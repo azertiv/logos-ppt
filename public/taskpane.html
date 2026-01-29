@@ -43,8 +43,20 @@
             <span id="density-value" class="density-value">3</span>
           </div>
         </label>
+        <label class="sort">
+          <span>Tri</span>
+          <select id="sort-select" class="select">
+            <option value="az">A-Z</option>
+            <option value="recent">Récents</option>
+            <option value="favorites">Favoris</option>
+          </select>
+        </label>
         <button id="keyword-toggle" class="toggle" type="button" aria-pressed="false">Keywords</button>
         <button id="refresh-btn" class="ghost">Recharger</button>
+        <label class="checkbox">
+          <input id="replace-toggle" type="checkbox" />
+          <span>Remplacer la sélection</span>
+        </label>
       </section>
 
       <section class="zip-area">

@@ -89,6 +89,15 @@ h1 {
   color: var(--muted);
 }
 
+.sort {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 140px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 
 .search input {
   padding: 10px 12px;
@@ -97,6 +106,23 @@ h1 {
   background: #ffffff;
   font-size: 13px;
   transition: border 200ms ease, box-shadow 200ms ease;
+}
+
+.select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+  font-size: 13px;
+  color: var(--ink);
+  transition: border 200ms ease, box-shadow 200ms ease;
+}
+
+.select:focus {
+  outline: none;
+  border-color: rgba(200, 16, 46, 0.5);
+  box-shadow: 0 0 0 3px rgba(200, 16, 46, 0.18);
 }
 
 .search-field {
@@ -271,6 +297,29 @@ button:hover {
   contain: layout paint;
 }
 
+.favorite-toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgba(27, 27, 27, 0.12);
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  padding: 0;
+  box-shadow: 0 6px 14px rgba(18, 18, 18, 0.12);
+}
+
+.favorite-toggle.is-active {
+  color: var(--accent);
+  border-color: rgba(200, 16, 46, 0.4);
+  box-shadow: 0 10px 18px rgba(200, 16, 46, 0.18);
+}
+
 .logo-card:focus {
   outline: 2px solid rgba(200, 16, 46, 0.4);
   outline-offset: 2px;
@@ -347,6 +396,26 @@ input[type="range"] {
   border-color: var(--accent);
   color: #ffffff;
   box-shadow: 0 10px 18px rgba(200, 16, 46, 0.25);
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkbox input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
 }
 
 .count-bubble {

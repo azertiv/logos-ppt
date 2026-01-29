@@ -9,14 +9,18 @@ const logoCount = document.getElementById("logo-count");
 const keywordToggle = document.getElementById("keyword-toggle");
 const densityRange = document.getElementById("density-range");
 const densityValue = document.getElementById("density-value");
+const sortSelect = document.getElementById("sort-select");
 const zipDrop = document.getElementById("zip-drop");
 const zipInput = document.getElementById("zip-input");
 const zipButton = document.getElementById("zip-button");
 const zipMeta = document.getElementById("zip-meta");
+const replaceToggle = document.getElementById("replace-toggle");
 
 let allLogos = [];
 let keywordsMap = new Map();
 let keywordFilterState = "all";
+let sortMode = "az";
+let replaceSelectionEnabled = false;
 let localLogosCache = null;
 let localZipRecord = null;
 let keywordsPromise = null;
@@ -36,10 +40,16 @@ let cachedSlideId = null;
 let cachedSlideIdAt = 0;
 const insertStateBySlide = new Map();
 const localObjectUrls = new Set();
+const favoriteSet = new Set();
+const recentMap = new Map();
 
 const STORAGE_KEYS = {
   density: "logosPptDensity",
-  keywordFilter: "logosPptKeywordFilter"
+  keywordFilter: "logosPptKeywordFilter",
+  sortMode: "logosPptSortMode",
+  favorites: "logosPptFavorites",
+  recents: "logosPptRecents",
+  replaceSelection: "logosPptReplaceSelection"
 };
 const ZIP_CACHE_KEY = "logosPptZipCache";
 const DB_NAME = "logosPptCache";
@@ -57,6 +67,7 @@ const INSERT_BASE_POSITION = { left: 48, top: 48 };
 const INSERT_OFFSET_STEP = { x: 18, y: 18 };
 const INSERT_OFFSET_STEPS = 8;
 const INSERT_RESET_MS = 60000;
+const RECENT_LIMIT = 80;
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.PowerPoint) {
@@ -105,6 +116,22 @@ async function init() {
     });
     updateGridColumns(Number(densityRange.value));
   }
+  if (sortSelect) {
+    sortSelect.addEventListener("change", () => {
+      const value = sortSelect.value;
+      sortMode = isValidSortMode(value) ? value : "az";
+      persistSortMode();
+      clearSearchCache();
+      requestRender();
+    });
+    syncSortSelect();
+  }
+  if (replaceToggle) {
+    replaceToggle.addEventListener("change", () => {
+      replaceSelectionEnabled = Boolean(replaceToggle.checked);
+      persistReplaceSelection();
+    });
+  }
   if (grid) {
     grid.addEventListener("click", handleGridClick);
     grid.addEventListener("keydown", handleGridKeydown);
@@ -121,6 +148,10 @@ function restorePreferences() {
   if (storedFilter && ["all", "with", "without"].includes(storedFilter)) {
     keywordFilterState = storedFilter;
   }
+  const storedSort = safeStorageGet(STORAGE_KEYS.sortMode);
+  if (storedSort && isValidSortMode(storedSort)) {
+    sortMode = storedSort;
+  }
   if (densityRange) {
     const storedDensity = Number.parseInt(
       safeStorageGet(STORAGE_KEYS.density) || "",
@@ -131,6 +162,16 @@ function restorePreferences() {
       densityRange.value = String(clamped);
     }
   }
+  if (sortSelect) {
+    sortSelect.value = sortMode;
+  }
+  loadFavoritesFromStorage();
+  loadRecentsFromStorage();
+  const storedReplace = safeStorageGet(STORAGE_KEYS.replaceSelection);
+  replaceSelectionEnabled = storedReplace === "1";
+  if (replaceToggle) {
+    replaceToggle.checked = replaceSelectionEnabled;
+  }
 }
 
 function persistKeywordFilter() {
@@ -140,6 +181,17 @@ function persistKeywordFilter() {
 function persistDensity(value) {
   if (!Number.isFinite(value)) return;
   safeStorageSet(STORAGE_KEYS.density, String(value));
+}
+
+function persistSortMode() {
+  safeStorageSet(STORAGE_KEYS.sortMode, sortMode);
+}
+
+function persistReplaceSelection() {
+  safeStorageSet(
+    STORAGE_KEYS.replaceSelection,
+    replaceSelectionEnabled ? "1" : "0"
+  );
 }
 
 function safeStorageGet(key) {
@@ -157,6 +209,68 @@ function safeStorageSet(key, value) {
   } catch (error) {
     // Ignore storage errors (private mode, quota).
   }
+}
+
+function isValidSortMode(value) {
+  return ["az", "recent", "favorites"].includes(value);
+}
+
+function syncSortSelect() {
+  if (!sortSelect) return;
+  sortSelect.value = sortMode;
+}
+
+function loadFavoritesFromStorage() {
+  favoriteSet.clear();
+  const raw = safeStorageGet(STORAGE_KEYS.favorites);
+  if (!raw) return;
+  try {
+    const items = JSON.parse(raw);
+    if (Array.isArray(items)) {
+      items.forEach((name) => {
+        if (typeof name === "string" && name.trim()) {
+          favoriteSet.add(name);
+        }
+      });
+    }
+  } catch (error) {
+    // Ignore invalid favorites storage.
+  }
+}
+
+function loadRecentsFromStorage() {
+  recentMap.clear();
+  const raw = safeStorageGet(STORAGE_KEYS.recents);
+  if (!raw) return;
+  try {
+    const items = JSON.parse(raw);
+    if (Array.isArray(items)) {
+      items.forEach((entry) => {
+        if (!entry || typeof entry.name !== "string") return;
+        const usedAt = Number(entry.usedAt) || 0;
+        if (usedAt > 0) {
+          recentMap.set(entry.name, usedAt);
+        }
+      });
+    }
+  } catch (error) {
+    // Ignore invalid recents storage.
+  }
+}
+
+function persistFavorites() {
+  safeStorageSet(
+    STORAGE_KEYS.favorites,
+    JSON.stringify(Array.from(favoriteSet))
+  );
+}
+
+function persistRecents() {
+  const entries = Array.from(recentMap.entries())
+    .map(([name, usedAt]) => ({ name, usedAt }))
+    .sort((a, b) => b.usedAt - a.usedAt)
+    .slice(0, RECENT_LIMIT);
+  safeStorageSet(STORAGE_KEYS.recents, JSON.stringify(entries));
 }
 
 function scheduleSearch(options = {}) {
@@ -186,6 +300,14 @@ function requestRender() {
 }
 
 function handleGridClick(event) {
+  const favButton = event.target.closest(".favorite-toggle");
+  if (favButton && grid.contains(favButton)) {
+    event.preventDefault();
+    event.stopPropagation();
+    const logoId = Number(favButton.dataset.logoId);
+    toggleFavoriteById(logoId, favButton);
+    return;
+  }
   const card = event.target.closest(".logo-card");
   if (!card || !grid.contains(card)) return;
   const logoId = Number(card.dataset.logoId);
@@ -197,6 +319,7 @@ function handleGridClick(event) {
 
 function handleGridKeydown(event) {
   if (event.key !== "Enter" && event.key !== " ") return;
+  if (event.target.closest(".favorite-toggle")) return;
   const card = event.target.closest(".logo-card");
   if (!card || !grid.contains(card)) return;
   event.preventDefault();
@@ -358,7 +481,7 @@ async function handleZipFile(file) {
 
 function filterLogos() {
   const query = normalizeSearchText(searchInput.value.trim());
-  const cacheKey = `${keywordFilterState}|${query}`;
+  const cacheKey = `${keywordFilterState}|${sortMode}|${query}`;
   const cached = searchCache.get(cacheKey);
   if (cached) return cached;
 
@@ -397,19 +520,46 @@ function filterLogos() {
     return true;
   });
 
-  cacheSearchResult(cacheKey, filtered);
-  return filtered;
+  const sorted = sortLogos(filtered);
+  cacheSearchResult(cacheKey, sorted);
+  return sorted;
+}
+
+function sortLogos(logos) {
+  const list = logos.slice();
+  if (sortMode === "recent") {
+    list.sort((a, b) => {
+      const delta = (b.lastUsedAt || 0) - (a.lastUsedAt || 0);
+      if (delta !== 0) return delta;
+      return a.name.localeCompare(b.name);
+    });
+    return list;
+  }
+  if (sortMode === "favorites") {
+    list.sort((a, b) => {
+      const favDelta = (b.isFavorite ? 1 : 0) - (a.isFavorite ? 1 : 0);
+      if (favDelta !== 0) return favDelta;
+      return a.name.localeCompare(b.name);
+    });
+    return list;
+  }
+  list.sort((a, b) => a.name.localeCompare(b.name));
+  return list;
 }
 
 function attachKeywords(items, map) {
   return items.map((logo) => {
     const keywords = map.get(logo.name) || [];
     const searchText = buildSearchText(logo.name, keywords);
+    const lastUsedAt = recentMap.get(logo.name) || 0;
+    const isFavorite = favoriteSet.has(logo.name);
     return {
       ...logo,
       keywords,
       hasKeywords: Array.isArray(keywords) && keywords.length > 0,
-      searchText
+      searchText,
+      lastUsedAt,
+      isFavorite
     };
   });
 }
@@ -553,11 +703,28 @@ function renderLogos(logos) {
 function createLogoCard(logo, index) {
   const card = document.createElement("div");
   card.className = "logo-card";
+  if (logo.isFavorite) {
+    card.classList.add("is-favorite");
+  }
   card.setAttribute("role", "button");
   card.setAttribute("tabindex", "0");
   card.setAttribute("aria-label", `Insérer ${logo.name}`);
   card.style.animationDelay = `${index * 20}ms`;
   card.dataset.logoId = String(logo.id ?? index);
+
+  const favButton = document.createElement("button");
+  favButton.type = "button";
+  favButton.className = "favorite-toggle";
+  if (logo.isFavorite) {
+    favButton.classList.add("is-active");
+  }
+  favButton.dataset.logoId = String(logo.id ?? index);
+  favButton.setAttribute(
+    "aria-label",
+    logo.isFavorite ? "Retirer des favoris" : "Ajouter aux favoris"
+  );
+  favButton.setAttribute("aria-pressed", logo.isFavorite ? "true" : "false");
+  favButton.textContent = "★";
 
   const preview = document.createElement("div");
   preview.className = "logo-preview";
@@ -575,6 +742,7 @@ function createLogoCard(logo, index) {
   }
 
   preview.appendChild(img);
+  card.appendChild(favButton);
   card.appendChild(preview);
   return card;
 }
@@ -638,6 +806,45 @@ function loadLogoPreview(img) {
     });
 }
 
+function toggleFavoriteById(logoId, button) {
+  if (!Number.isFinite(logoId)) return;
+  const logo = logoById.get(logoId);
+  if (!logo || !logo.name) return;
+  const nextState = !logo.isFavorite;
+  logo.isFavorite = nextState;
+  if (nextState) {
+    favoriteSet.add(logo.name);
+  } else {
+    favoriteSet.delete(logo.name);
+  }
+  persistFavorites();
+  updateFavoriteButton(button, nextState);
+  clearSearchCache();
+  requestRender();
+}
+
+function updateFavoriteButton(button, isFavorite) {
+  if (!button) return;
+  button.classList.toggle("is-active", isFavorite);
+  button.setAttribute("aria-pressed", isFavorite ? "true" : "false");
+  button.setAttribute(
+    "aria-label",
+    isFavorite ? "Retirer des favoris" : "Ajouter aux favoris"
+  );
+}
+
+function recordRecent(logo) {
+  if (!logo || !logo.name) return;
+  const usedAt = Date.now();
+  recentMap.set(logo.name, usedAt);
+  logo.lastUsedAt = usedAt;
+  persistRecents();
+  clearSearchCache();
+  if (sortMode === "recent") {
+    requestRender();
+  }
+}
+
 async function ensureLogoUrl(logo) {
   if (logo.url) return logo.url;
   if (logo.urlPromise) return logo.urlPromise;
@@ -691,6 +898,40 @@ async function getPreparedSvg(logo) {
   return normalized;
 }
 
+async function getReplaceSelectionPosition() {
+  if (!replaceSelectionEnabled) return null;
+  if (typeof PowerPoint === "undefined" || typeof PowerPoint.run !== "function") {
+    return null;
+  }
+  let info = null;
+  try {
+    await PowerPoint.run(async (context) => {
+      if (typeof context.presentation.getSelectedShapes !== "function") {
+        return;
+      }
+      const shapes = context.presentation.getSelectedShapes();
+      shapes.load("items");
+      await context.sync();
+      if (!shapes.items || shapes.items.length !== 1) {
+        return;
+      }
+      const shape = shapes.items[0];
+      shape.load(["left", "top", "width", "height"]);
+      await context.sync();
+      info = {
+        imageLeft: shape.left,
+        imageTop: shape.top,
+        imageWidth: shape.width,
+        imageHeight: shape.height
+      };
+    });
+  } catch (error) {
+    console.warn("Impossible de récupérer la sélection.", error);
+    return null;
+  }
+  return info;
+}
+
 function insertLogo(logo) {
   if (!logo) return Promise.resolve();
   insertQueue = insertQueue
@@ -717,9 +958,17 @@ async function insertLogoNow(logo) {
 
   try {
     const svg = await getPreparedSvg(logo);
-    const position = await getNextInsertPosition();
-    await insertSvg(svg, position);
+    const position = replaceSelectionEnabled
+      ? await getReplaceSelectionPosition()
+      : null;
+    if (position) {
+      await insertSvg(svg, position);
+    } else {
+      const fallbackPosition = await getNextInsertPosition();
+      await insertSvg(svg, fallbackPosition);
+    }
 
+    recordRecent(logo);
     setStatus(`Logo inséré : ${logo.name}`, "success");
   } catch (error) {
     console.error(error);
@@ -749,11 +998,19 @@ async function insertSvg(svg, position = {}) {
   const top = Number.isFinite(position.imageTop)
     ? position.imageTop
     : INSERT_BASE_POSITION.top;
+  const width = Number.isFinite(position.imageWidth) ? position.imageWidth : null;
+  const height = Number.isFinite(position.imageHeight) ? position.imageHeight : null;
   const options = {
     coercionType: Office.CoercionType.XmlSvg,
     imageLeft: left,
     imageTop: top
   };
+  if (width) {
+    options.imageWidth = width;
+  }
+  if (height) {
+    options.imageHeight = height;
+  }
 
   try {
     await setSelectedData(svg, options);
