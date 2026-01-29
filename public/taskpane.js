@@ -3,13 +3,12 @@
 const grid = document.getElementById("logo-grid");
 const statusEl = document.getElementById("status");
 const searchInput = document.getElementById("search-input");
+const searchClear = document.getElementById("search-clear");
 const refreshBtn = document.getElementById("refresh-btn");
-const dropZone = document.getElementById("drop-zone");
 const logoCount = document.getElementById("logo-count");
 const keywordFilter = document.getElementById("keyword-filter");
 
 let allLogos = [];
-let draggingLogo = null;
 let keywordsMap = new Map();
 
 Office.onReady((info) => {
@@ -23,25 +22,19 @@ Office.onReady((info) => {
 
 function init() {
   refreshBtn.addEventListener("click", () => loadLogos());
-  searchInput.addEventListener("input", () => renderLogos(filterLogos()));
+  searchInput.addEventListener("input", () => {
+    updateSearchClear();
+    renderLogos(filterLogos());
+  });
+  searchClear.addEventListener("click", () => {
+    searchInput.value = "";
+    updateSearchClear();
+    renderLogos(filterLogos());
+    searchInput.focus();
+  });
   keywordFilter.addEventListener("change", () => renderLogos(filterLogos()));
 
-  dropZone.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    dropZone.classList.add("over");
-  });
-
-  dropZone.addEventListener("dragleave", () => dropZone.classList.remove("over"));
-
-  dropZone.addEventListener("drop", async (event) => {
-    event.preventDefault();
-    dropZone.classList.remove("over");
-    if (draggingLogo) {
-      await insertLogo(draggingLogo);
-      draggingLogo = null;
-    }
-  });
-
+  updateSearchClear();
   loadLogos();
 }
 
@@ -76,7 +69,10 @@ function filterLogos() {
   const filter = keywordFilter.value;
 
   return allLogos.filter((logo) => {
-    const matchesQuery = query ? logo.name.toLowerCase().includes(query) : true;
+    const matchesQuery = query
+      ? logo.name.toLowerCase().includes(query) ||
+        (logo.keywords || []).some((kw) => kw.toLowerCase().includes(query))
+      : true;
     const matchesFilter =
       filter === "with"
         ? logo.hasKeywords
@@ -106,7 +102,6 @@ function renderLogos(logos) {
     card.setAttribute("tabindex", "0");
     card.setAttribute("aria-label", `Insérer ${logo.name}`);
     card.style.animationDelay = `${index * 20}ms`;
-    card.draggable = true;
 
     const preview = document.createElement("div");
     preview.className = "logo-preview";
@@ -142,18 +137,6 @@ function renderLogos(logos) {
       }
     });
 
-    card.addEventListener("dragstart", (event) => {
-      draggingLogo = logo;
-      event.dataTransfer.effectAllowed = "copy";
-      event.dataTransfer.setData("text/plain", logo.url);
-      dropZone.classList.add("active");
-    });
-
-    card.addEventListener("dragend", () => {
-      dropZone.classList.remove("active");
-      dropZone.classList.remove("over");
-    });
-
     grid.appendChild(card);
   });
 }
@@ -172,6 +155,7 @@ async function insertLogo(logo) {
   try {
     const svgText = await fetch(logo.url).then((res) => res.text());
     const svg = normalizeSvg(svgText);
+    await clearSelection();
     await setSelectedData(svg, { coercionType: Office.CoercionType.XmlSvg });
 
     setStatus(`Logo inséré : ${logo.name}`, "success");
@@ -196,6 +180,27 @@ function setSelectedData(data, options) {
   });
 }
 
+async function clearSelection() {
+  if (typeof PowerPoint === "undefined" || typeof PowerPoint.run !== "function") {
+    return;
+  }
+
+  try {
+    await PowerPoint.run(async (context) => {
+      const slides = context.presentation.getSelectedSlides();
+      slides.load("items");
+      await context.sync();
+      const slide = slides.items[0];
+      if (slide && typeof slide.setSelectedShapes === "function") {
+        slide.setSelectedShapes([]);
+        await context.sync();
+      }
+    });
+  } catch (error) {
+    // Ignore selection clearing errors; fallback to default behavior.
+  }
+}
+
 async function loadKeywords() {
   try {
     const response = await fetch("keywords.json", { cache: "no-store" });
@@ -214,6 +219,12 @@ async function loadKeywords() {
   } catch (error) {
     return new Map();
   }
+}
+
+function updateSearchClear() {
+  if (!searchClear) return;
+  const hasQuery = searchInput.value.trim().length > 0;
+  searchClear.classList.toggle("hidden", !hasQuery);
 }
 
 function normalizeSvg(text) {

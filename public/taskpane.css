@@ -107,6 +107,51 @@ h1 {
   transition: border 200ms ease, box-shadow 200ms ease;
 }
 
+.search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-field input {
+  width: 100%;
+  padding-right: 34px;
+}
+
+.search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(31, 25, 19, 0.08);
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  transition: background 150ms ease, color 150ms ease, transform 120ms ease;
+  box-shadow: none;
+}
+
+.search-clear.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) scale(0.9);
+}
+
+.search-clear:hover {
+  background: rgba(31, 25, 19, 0.18);
+  color: var(--ink);
+  transform: translateY(-50%);
+  box-shadow: none;
+}
+
 .search input:focus,
 .filter select:focus {
   outline: none;
@@ -134,30 +179,6 @@ button.ghost {
 button:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(31, 25, 19, 0.15);
-}
-
-.drop-zone {
-  border: 2px dashed rgba(12, 107, 109, 0.35);
-  border-radius: var(--radius);
-  padding: 16px;
-  text-align: center;
-  background: rgba(255, 255, 255, 0.7);
-  color: var(--teal);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  transition: border 200ms ease, background 200ms ease, transform 200ms ease;
-}
-
-.drop-zone.active {
-  border-color: var(--accent);
-  background: rgba(239, 111, 84, 0.12);
-  transform: scale(1.01);
-}
-
-.drop-zone.over {
-  border-color: var(--accent-dark);
-  background: rgba(239, 111, 84, 0.18);
 }
 
 .status {
