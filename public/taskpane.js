@@ -12,7 +12,7 @@ const densityValue = document.getElementById("density-value");
 
 let allLogos = [];
 let keywordsMap = new Map();
-let keywordOnly = false;
+let keywordFilterState = "all";
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.PowerPoint) {
@@ -37,11 +37,16 @@ function init() {
   });
   if (keywordToggle) {
     keywordToggle.addEventListener("click", () => {
-      keywordOnly = !keywordOnly;
-      keywordToggle.classList.toggle("is-active", keywordOnly);
-      keywordToggle.setAttribute("aria-pressed", String(keywordOnly));
+      keywordFilterState =
+        keywordFilterState === "all"
+          ? "with"
+          : keywordFilterState === "with"
+            ? "without"
+            : "all";
+      syncKeywordToggle();
       renderLogos(filterLogos());
     });
+    syncKeywordToggle();
   }
   if (densityRange) {
     densityRange.addEventListener("input", () => {
@@ -88,7 +93,12 @@ function filterLogos() {
       ? logo.name.toLowerCase().includes(query) ||
         (logo.keywords || []).some((kw) => kw.toLowerCase().includes(query))
       : true;
-    const matchesFilter = keywordOnly ? logo.hasKeywords : true;
+    const matchesFilter =
+      keywordFilterState === "with"
+        ? logo.hasKeywords
+        : keywordFilterState === "without"
+          ? !logo.hasKeywords
+          : true;
     return matchesQuery && matchesFilter;
   });
 }
@@ -270,6 +280,26 @@ function updateSearchClear() {
   if (!searchClear) return;
   const hasQuery = searchInput.value.trim().length > 0;
   searchClear.classList.toggle("hidden", !hasQuery);
+}
+
+function syncKeywordToggle() {
+  if (!keywordToggle) return;
+  const isWith = keywordFilterState === "with";
+  const isWithout = keywordFilterState === "without";
+  keywordToggle.classList.toggle("is-active", isWith);
+  keywordToggle.classList.toggle("is-negative", isWithout);
+  keywordToggle.setAttribute(
+    "aria-pressed",
+    isWith ? "true" : isWithout ? "mixed" : "false"
+  );
+  keywordToggle.setAttribute(
+    "aria-label",
+    isWith
+      ? "Keywords activés"
+      : isWithout
+        ? "Keywords désactivés"
+        : "Keywords sans filtre"
+  );
 }
 
 function updateGridColumns(columns) {
