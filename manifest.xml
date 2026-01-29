@@ -11,9 +11,9 @@
   <DefaultLocale>fr-FR</DefaultLocale>
   <DisplayName DefaultValue="Atelier Pictos" />
   <Description DefaultValue="Recherchez et insérez des pictogrammes dans vos slides." />
-  <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png" />
-  <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-128.png" />
-  <SupportUrl DefaultValue="https://localhost:3000" />
+  <IconUrl DefaultValue="https://azertiv.github.io/logos-ppt/assets/icon-32.png" />
+  <HighResolutionIconUrl DefaultValue="https://azertiv.github.io/logos-ppt/assets/icon-128.png" />
+  <SupportUrl DefaultValue="https://azertiv.github.io/logos-ppt/" />
 
   <Hosts>
     <Host Name="Presentation" />
@@ -26,7 +26,7 @@
   </Requirements>
 
   <DefaultSettings>
-    <SourceLocation DefaultValue="https://localhost:3000/taskpane.html" />
+    <SourceLocation DefaultValue="https://azertiv.github.io/logos-ppt/taskpane.html" />
   </DefaultSettings>
 
   <Permissions>ReadWriteDocument</Permissions>
@@ -69,12 +69,12 @@
 
     <Resources>
       <bt:Images>
-        <bt:Image id="Pictos.Icon16" DefaultValue="https://localhost:3000/assets/icon-32.png" />
-        <bt:Image id="Pictos.Icon32" DefaultValue="https://localhost:3000/assets/icon-32.png" />
-        <bt:Image id="Pictos.Icon80" DefaultValue="https://localhost:3000/assets/icon-80.png" />
+        <bt:Image id="Pictos.Icon16" DefaultValue="https://azertiv.github.io/logos-ppt/assets/icon-32.png" />
+        <bt:Image id="Pictos.Icon32" DefaultValue="https://azertiv.github.io/logos-ppt/assets/icon-32.png" />
+        <bt:Image id="Pictos.Icon80" DefaultValue="https://azertiv.github.io/logos-ppt/assets/icon-80.png" />
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Pictos.TaskpaneUrl" DefaultValue="https://localhost:3000/taskpane.html" />
+        <bt:Url id="Pictos.TaskpaneUrl" DefaultValue="https://azertiv.github.io/logos-ppt/taskpane.html" />
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="Pictos.GroupLabel" DefaultValue="Pictogrammes" />
