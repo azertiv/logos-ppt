@@ -9,31 +9,17 @@ const port = process.env.PORT || 3000;
 
 const publicDir = path.join(__dirname, "public");
 const mediaDir = path.join(__dirname, "media");
-const logosDir = path.join(mediaDir, "logos");
+const keywordsPath = path.join(mediaDir, "keywords.json");
 
 app.use("/", express.static(publicDir));
 app.use("/media", express.static(mediaDir));
 
-app.get("/logos.json", (req, res) => {
-  const allowed = new Set([".svg"]);
-
-  let items = [];
-  if (fs.existsSync(logosDir)) {
-    const files = fs.readdirSync(logosDir);
-    items = files
-      .filter((file) => allowed.has(path.extname(file).toLowerCase()))
-      .map((file) => ({
-        name: file,
-        ext: path.extname(file).toLowerCase().replace(".", ""),
-        url: `media/logos/${encodeURIComponent(file)}`
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+app.get("/keywords.json", (req, res) => {
+  if (!fs.existsSync(keywordsPath)) {
+    res.status(404).json({ items: [] });
+    return;
   }
-
-  res.json({
-    count: items.length,
-    items
-  });
+  res.sendFile(keywordsPath);
 });
 
 async function start() {

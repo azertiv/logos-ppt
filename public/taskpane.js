@@ -9,8 +9,6 @@ const logoCount = document.getElementById("logo-count");
 const keywordToggle = document.getElementById("keyword-toggle");
 const densityRange = document.getElementById("density-range");
 const densityValue = document.getElementById("density-value");
-const sourceOnlineBtn = document.getElementById("source-online");
-const sourceLocalBtn = document.getElementById("source-local");
 const zipDrop = document.getElementById("zip-drop");
 const zipInput = document.getElementById("zip-input");
 const zipButton = document.getElementById("zip-button");
@@ -19,14 +17,11 @@ const zipMeta = document.getElementById("zip-meta");
 let allLogos = [];
 let keywordsMap = new Map();
 let keywordFilterState = "all";
-let sourceMode = "online";
-let onlineLogosCache = null;
 let localLogosCache = null;
 let localZipRecord = null;
 let keywordsPromise = null;
 const localObjectUrls = new Set();
 
-const SOURCE_PREFERENCE_KEY = "logosPptSourcePreference";
 const ZIP_CACHE_KEY = "logosPptZipCache";
 const DB_NAME = "logosPptCache";
 const DB_VERSION = 1;
@@ -75,28 +70,11 @@ async function init() {
     });
     updateGridColumns(Number(densityRange.value));
   }
-  initSourceSwitch();
   initZipDropzone();
 
   updateSearchClear();
   await hydrateLocalCacheMeta();
-  const preferredSource = getStoredSourcePreference();
-  setSource(preferredSource || "online", { persist: false });
   await loadLogos();
-}
-
-function initSourceSwitch() {
-  if (sourceOnlineBtn) {
-    sourceOnlineBtn.addEventListener("click", () => {
-      setSource("online", { persist: true, load: true });
-    });
-  }
-  if (sourceLocalBtn) {
-    sourceLocalBtn.addEventListener("click", () => {
-      setSource("local", { persist: true, load: true });
-    });
-  }
-  syncSourceSwitch();
 }
 
 function initZipDropzone() {
@@ -146,47 +124,6 @@ function initZipDropzone() {
   });
 }
 
-function setSource(source, options = {}) {
-  const { persist = true, load = false, force = false } = options;
-  sourceMode = source === "local" ? "local" : "online";
-  syncSourceSwitch();
-  if (persist) {
-    setStoredSourcePreference(sourceMode);
-  }
-  if (load) {
-    loadLogos({ force });
-  }
-}
-
-function syncSourceSwitch() {
-  if (sourceOnlineBtn) {
-    const isOnline = sourceMode === "online";
-    sourceOnlineBtn.classList.toggle("is-active", isOnline);
-    sourceOnlineBtn.setAttribute("aria-pressed", isOnline ? "true" : "false");
-  }
-  if (sourceLocalBtn) {
-    const isLocal = sourceMode === "local";
-    sourceLocalBtn.classList.toggle("is-active", isLocal);
-    sourceLocalBtn.setAttribute("aria-pressed", isLocal ? "true" : "false");
-  }
-}
-
-function getStoredSourcePreference() {
-  try {
-    return localStorage.getItem(SOURCE_PREFERENCE_KEY);
-  } catch (error) {
-    return null;
-  }
-}
-
-function setStoredSourcePreference(value) {
-  try {
-    localStorage.setItem(SOURCE_PREFERENCE_KEY, value);
-  } catch (error) {
-    // Ignore storage errors.
-  }
-}
-
 async function hydrateLocalCacheMeta() {
   const record = await readZipCache();
   if (record && record.meta) {
@@ -197,40 +134,7 @@ async function hydrateLocalCacheMeta() {
 
 async function loadLogos(options = {}) {
   const { force = false } = options;
-  if (sourceMode === "local") {
-    await loadLocalLogos({ force });
-    return;
-  }
-  await loadOnlineLogos({ force });
-}
-
-async function loadOnlineLogos(options = {}) {
-  const { force = false } = options;
-  setStatus("Chargement des logos en ligne…");
-  try {
-    const map = await getKeywordsMap();
-    if (onlineLogosCache && !force) {
-      keywordsMap = map;
-      allLogos = attachKeywords(onlineLogosCache, keywordsMap);
-      renderLogos(filterLogos());
-      setStatus("");
-      return;
-    }
-    const response = await fetch("logos.json", {
-      cache: force ? "no-store" : "default"
-    });
-    const data = await response.json();
-    const items = Array.isArray(data.items) ? data.items : [];
-    onlineLogosCache = items.map((logo) => ({ ...logo }));
-    keywordsMap = map;
-    allLogos = attachKeywords(onlineLogosCache, keywordsMap);
-    renderLogos(filterLogos());
-    setStatus(allLogos.length ? "" : "Aucun logo disponible en ligne.");
-  } catch (error) {
-    console.error(error);
-    setStatus("Impossible de charger la liste des logos en ligne.", "error");
-    renderEmptyState("Aucun logo en ligne disponible.");
-  }
+  await loadLocalLogos({ force });
 }
 
 async function loadLocalLogos(options = {}) {
@@ -297,9 +201,6 @@ async function handleZipFile(file) {
     updateZipMeta(meta);
     await saveZipCache(buffer, meta);
 
-    if (sourceMode !== "local") {
-      setSource("local", { persist: true, load: false });
-    }
     await loadLocalLogos();
 
     const note = buildZipStatsMessage(parsed.stats);
@@ -400,10 +301,10 @@ async function insertLogo(logo) {
   setStatus(`Insertion de ${logo.name}…`);
 
   try {
-    const svgText = logo.svgText
-      ? logo.svgText
-      : await fetch(logo.url).then((res) => res.text());
-    const svg = normalizeSvg(svgText);
+    if (!logo.svgText) {
+      throw new Error("SVG introuvable en local.");
+    }
+    const svg = normalizeSvg(logo.svgText);
     await forceSlideSelection();
     await insertSvg(svg);
 

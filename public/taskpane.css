@@ -89,54 +89,6 @@ h1 {
   color: var(--muted);
 }
 
-.source {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex: 0 1 140px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.source-switch {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: #ffffff;
-}
-
-.source-switch .segment {
-  flex: 1;
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  background: transparent;
-  color: var(--muted);
-  box-shadow: none;
-  transition: background 150ms ease, color 150ms ease, transform 120ms ease;
-}
-
-.source-switch .segment.is-active[data-source="online"] {
-  background: var(--accent);
-  color: #ffffff;
-  box-shadow: 0 10px 18px rgba(200, 16, 46, 0.18);
-}
-
-.source-switch .segment.is-active[data-source="local"] {
-  background: var(--toggle-on);
-  color: #ffffff;
-  box-shadow: 0 10px 18px rgba(31, 122, 58, 0.2);
-}
-
-.source-switch .segment:hover {
-  transform: none;
-  box-shadow: none;
-}
 
 .search input {
   padding: 10px 12px;
