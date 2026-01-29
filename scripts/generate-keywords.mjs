@@ -13,7 +13,7 @@ const apiKey = process.env.GEMINI_API_KEY;
 const force = process.env.FORCE === "1";
 const concurrency = Math.max(
   1,
-  Number.parseInt(process.env.CONCURRENCY || "5", 10) || 5
+  Number.parseInt(process.env.CONCURRENCY || "10", 10) || 10
 );
 
 if (!apiKey) {
