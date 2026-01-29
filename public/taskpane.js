@@ -6,14 +6,17 @@ const searchInput = document.getElementById("search-input");
 const searchClear = document.getElementById("search-clear");
 const refreshBtn = document.getElementById("refresh-btn");
 const logoCount = document.getElementById("logo-count");
-const keywordFilter = document.getElementById("keyword-filter");
+const keywordToggle = document.getElementById("keyword-toggle");
+const densityRange = document.getElementById("density-range");
+const densityValue = document.getElementById("density-value");
 
 let allLogos = [];
 let keywordsMap = new Map();
+let keywordOnly = false;
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.PowerPoint) {
-    setStatus("Ouvrez cet add-in dans PowerPoint pour insérer les pictogrammes.", "error");
+    setStatus("Ouvrez cet add-in dans PowerPoint pour insérer les logos.", "error");
     return;
   }
 
@@ -32,14 +35,27 @@ function init() {
     renderLogos(filterLogos());
     searchInput.focus();
   });
-  keywordFilter.addEventListener("change", () => renderLogos(filterLogos()));
+  if (keywordToggle) {
+    keywordToggle.addEventListener("click", () => {
+      keywordOnly = !keywordOnly;
+      keywordToggle.classList.toggle("is-active", keywordOnly);
+      keywordToggle.setAttribute("aria-pressed", String(keywordOnly));
+      renderLogos(filterLogos());
+    });
+  }
+  if (densityRange) {
+    densityRange.addEventListener("input", () => {
+      updateGridColumns(Number(densityRange.value));
+    });
+    updateGridColumns(Number(densityRange.value));
+  }
 
   updateSearchClear();
   loadLogos();
 }
 
 async function loadLogos() {
-  setStatus("Chargement des pictogrammes…");
+  setStatus("Chargement des logos…");
   try {
     const [response, map] = await Promise.all([
       fetch("logos.json", { cache: "no-store" }),
@@ -55,36 +71,31 @@ async function loadLogos() {
         hasKeywords: Array.isArray(keywords) && keywords.length > 0
       };
     });
-    logoCount.textContent = `${data.count || allLogos.length} logos`;
     renderLogos(filterLogos());
     setStatus(allLogos.length ? "" : "Aucun logo trouvé dans media/logos.");
   } catch (error) {
     console.error(error);
     setStatus("Impossible de charger la liste des logos.", "error");
+    updateLogoCount(0);
   }
 }
 
 function filterLogos() {
   const query = searchInput.value.trim().toLowerCase();
-  const filter = keywordFilter.value;
 
   return allLogos.filter((logo) => {
     const matchesQuery = query
       ? logo.name.toLowerCase().includes(query) ||
         (logo.keywords || []).some((kw) => kw.toLowerCase().includes(query))
       : true;
-    const matchesFilter =
-      filter === "with"
-        ? logo.hasKeywords
-        : filter === "without"
-          ? !logo.hasKeywords
-          : true;
+    const matchesFilter = keywordOnly ? logo.hasKeywords : true;
     return matchesQuery && matchesFilter;
   });
 }
 
 function renderLogos(logos) {
   grid.innerHTML = "";
+  updateLogoCount(logos.length);
 
   if (!logos.length) {
     const empty = document.createElement("div");
@@ -97,7 +108,6 @@ function renderLogos(logos) {
   logos.forEach((logo, index) => {
     const card = document.createElement("div");
     card.className = "logo-card";
-    card.classList.add(logo.hasKeywords ? "has-keywords" : "no-keywords");
     card.setAttribute("role", "button");
     card.setAttribute("tabindex", "0");
     card.setAttribute("aria-label", `Insérer ${logo.name}`);
@@ -112,22 +122,7 @@ function renderLogos(logos) {
     img.alt = logo.name;
     preview.appendChild(img);
 
-    const meta = document.createElement("div");
-    meta.className = "logo-meta";
-
-    const name = document.createElement("span");
-    name.className = "logo-name";
-    name.textContent = logo.name;
-
-    const ext = document.createElement("span");
-    ext.className = "logo-ext";
-    ext.textContent = "svg";
-
-    meta.appendChild(name);
-    meta.appendChild(ext);
-
     card.appendChild(preview);
-    card.appendChild(meta);
 
     card.addEventListener("click", () => insertLogo(logo));
     card.addEventListener("keydown", (event) => {
@@ -275,6 +270,21 @@ function updateSearchClear() {
   if (!searchClear) return;
   const hasQuery = searchInput.value.trim().length > 0;
   searchClear.classList.toggle("hidden", !hasQuery);
+}
+
+function updateGridColumns(columns) {
+  if (!grid || !columns) return;
+  const value = Math.min(4, Math.max(1, Number(columns)));
+  grid.style.setProperty("--grid-columns", value);
+  if (densityValue) {
+    densityValue.textContent = String(value);
+  }
+}
+
+function updateLogoCount(count) {
+  if (!logoCount) return;
+  const label = count === 1 ? "logo" : "logos";
+  logoCount.textContent = `${count} ${label}`;
 }
 
 function normalizeSvg(text) {
