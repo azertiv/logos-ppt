@@ -78,7 +78,14 @@ for (const file of svgFiles) {
   }
 
   const base64 = fs.readFileSync(pngPath, "base64");
-  const text = await callGemini(model, apiKey, prompt, base64);
+  let text = "";
+  try {
+    text = await callGeminiWithRetry(model, apiKey, prompt, base64);
+  } catch (error) {
+    console.error(`Gemini failed for ${file}:`, error.message || error);
+    continue;
+  }
+
   const keywords = parseKeywords(text);
 
   results.push({
@@ -134,6 +141,32 @@ async function callGemini(modelName, key, promptText, imageBase64) {
     throw new Error("Empty response from Gemini.");
   }
   return text;
+}
+
+async function callGeminiWithRetry(modelName, key, promptText, imageBase64) {
+  const maxAttempts = 3;
+  const delayMs = 10_000;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await callGemini(modelName, key, promptText, imageBase64);
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts) {
+        console.warn(
+          `Gemini attempt ${attempt} failed, retrying in ${delayMs / 1000}s...`
+        );
+        await sleep(delayMs);
+      }
+    }
+  }
+
+  throw lastError || new Error("Gemini failed after retries.");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function parseKeywords(text) {
