@@ -49,7 +49,7 @@ async function start() {
   const httpsOptions = await devcerts.getHttpsServerOptions();
 
   https.createServer(httpsOptions, app).listen(port, () => {
-    console.log(`Logos add-in server running at https://localhost:${port}`);
+    console.log(`Logos add-in server running on port ${port}`);
   });
 }
 
