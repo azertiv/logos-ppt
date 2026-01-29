@@ -6,6 +6,7 @@ const publicDir = path.join(root, "public");
 const mediaDir = path.join(root, "media", "logos");
 const distDir = path.join(root, "dist");
 const distMediaDir = path.join(distDir, "media", "logos");
+const keywordsPath = path.join(root, "media", "keywords.json");
 
 const allowed = new Set([".svg"]);
 
@@ -74,6 +75,9 @@ function build() {
   copyDirSync(publicDir, distDir);
   buildLogos();
   copyLogos();
+  if (fs.existsSync(keywordsPath)) {
+    copyFileSync(keywordsPath, path.join(distDir, "keywords.json"));
+  }
   fs.writeFileSync(path.join(distDir, ".nojekyll"), "");
   console.log("Built dist/ for GitHub Pages.");
 }
