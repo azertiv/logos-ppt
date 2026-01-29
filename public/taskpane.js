@@ -155,8 +155,8 @@ async function insertLogo(logo) {
   try {
     const svgText = await fetch(logo.url).then((res) => res.text());
     const svg = normalizeSvg(svgText);
-    await clearSelection();
-    await setSelectedData(svg, { coercionType: Office.CoercionType.XmlSvg });
+    await forceSlideSelection();
+    await insertSvg(svg);
 
     setStatus(`Logo inséré : ${logo.name}`, "success");
   } catch (error) {
@@ -180,25 +180,75 @@ function setSelectedData(data, options) {
   });
 }
 
-async function clearSelection() {
+async function insertSvg(svg) {
+  const options = {
+    coercionType: Office.CoercionType.XmlSvg,
+    imageLeft: 48,
+    imageTop: 48
+  };
+
+  try {
+    await setSelectedData(svg, options);
+  } catch (error) {
+    if (isSelectionError(error)) {
+      await forceSlideSelection();
+      await setSelectedData(svg, options);
+      return;
+    }
+    throw error;
+  }
+}
+
+function isSelectionError(error) {
+  const message = (error && error.message) ? error.message : String(error || "");
+  return (
+    /current selection/i.test(message) ||
+    /sélection actuelle/i.test(message) ||
+    /selection/i.test(message)
+  );
+}
+
+async function forceSlideSelection() {
   if (typeof PowerPoint === "undefined" || typeof PowerPoint.run !== "function") {
     return;
   }
 
   try {
-    await PowerPoint.run(async (context) => {
-      const slides = context.presentation.getSelectedSlides();
-      slides.load("items");
-      await context.sync();
-      const slide = slides.items[0];
-      if (slide && typeof slide.setSelectedShapes === "function") {
-        slide.setSelectedShapes([]);
-        await context.sync();
-      }
-    });
+    const slideId = await getSelectedSlideId();
+    if (!slideId) {
+      return;
+    }
+    await goToSlide(slideId);
   } catch (error) {
-    // Ignore selection clearing errors; fallback to default behavior.
+    // Ignore selection forcing errors and fall back to default behavior.
   }
+}
+
+async function getSelectedSlideId() {
+  let slideId = null;
+  await PowerPoint.run(async (context) => {
+    const slides = context.presentation.getSelectedSlides();
+    slides.load("items");
+    await context.sync();
+    const slide = slides.items[0];
+    if (!slide) {
+      return;
+    }
+    slide.load("id");
+    await context.sync();
+    slideId = slide.id;
+  });
+  return slideId;
+}
+
+function goToSlide(slideId) {
+  return new Promise((resolve) => {
+    Office.context.document.goToByIdAsync(
+      slideId,
+      Office.GoToType.Slide,
+      () => resolve()
+    );
+  });
 }
 
 async function loadKeywords() {
