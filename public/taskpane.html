@@ -12,6 +12,7 @@
     />
     <link rel="stylesheet" href="taskpane.css" />
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   </head>
   <body>
     <div class="app">
@@ -42,8 +43,27 @@
             <span id="density-value" class="density-value">3</span>
           </div>
         </label>
+        <div class="source">
+          <span>Source</span>
+          <div class="source-switch" role="group" aria-label="Source des logos">
+            <button id="source-online" class="segment is-active" data-source="online" type="button">Online</button>
+            <button id="source-local" class="segment" data-source="local" type="button">Local</button>
+          </div>
+        </div>
         <button id="keyword-toggle" class="toggle" type="button" aria-pressed="false">Keywords</button>
         <button id="refresh-btn" class="ghost">Rafraîchir</button>
+      </section>
+
+      <section class="zip-area">
+        <div id="zip-drop" class="zip-drop" role="button" tabindex="0" aria-label="Importer un ZIP de pictogrammes">
+          <input id="zip-input" type="file" accept=".zip,application/zip" />
+          <div class="zip-copy">
+            <div class="zip-title">Glissez votre .zip de pictos ici</div>
+            <div class="zip-subtitle">Ou cliquez pour sélectionner un fichier local.</div>
+          </div>
+          <button id="zip-button" class="ghost" type="button">Choisir un fichier</button>
+        </div>
+        <div id="zip-meta" class="zip-meta">Aucun ZIP local chargé.</div>
       </section>
 
       <section id="status" class="status" aria-live="polite"></section>
