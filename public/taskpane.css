@@ -250,6 +250,8 @@ button:hover {
   display: grid;
   grid-template-columns: repeat(var(--grid-columns), minmax(0, 1fr));
   gap: 14px;
+  content-visibility: auto;
+  contain-intrinsic-size: 800px;
 }
 
 .logo-card {
@@ -266,6 +268,7 @@ button:hover {
   animation: riseIn 500ms ease-out both;
   position: relative;
   aspect-ratio: 1 / 1;
+  contain: layout paint;
 }
 
 .logo-card:focus {

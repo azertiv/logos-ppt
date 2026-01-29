@@ -20,12 +20,43 @@ let keywordFilterState = "all";
 let localLogosCache = null;
 let localZipRecord = null;
 let keywordsPromise = null;
+let logoById = new Map();
+let tokenIndex = new Map();
+let searchCache = new Map();
+let searchTimer = null;
+let renderToken = 0;
+let renderFrame = null;
+let lazyObserver = null;
+let zipSession = null;
+let zipWorker = null;
+let zipWorkerRequestId = 0;
+const zipWorkerRequests = new Map();
+let insertQueue = Promise.resolve();
+let cachedSlideId = null;
+let cachedSlideIdAt = 0;
+const insertStateBySlide = new Map();
 const localObjectUrls = new Set();
 
+const STORAGE_KEYS = {
+  density: "logosPptDensity",
+  keywordFilter: "logosPptKeywordFilter"
+};
 const ZIP_CACHE_KEY = "logosPptZipCache";
 const DB_NAME = "logosPptCache";
 const DB_VERSION = 1;
 const DB_STORE = "assets";
+const TRANSPARENT_PIXEL =
+  "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
+const MIN_SEARCH_PREFIX = 3;
+const SEARCH_DEBOUNCE_MS = 140;
+const SEARCH_CACHE_LIMIT = 50;
+const RENDER_BATCH_SIZE = 72;
+const LAZY_ROOT_MARGIN = "160px";
+const SLIDE_ID_CACHE_MS = 1000;
+const INSERT_BASE_POSITION = { left: 48, top: 48 };
+const INSERT_OFFSET_STEP = { x: 18, y: 18 };
+const INSERT_OFFSET_STEPS = 8;
+const INSERT_RESET_MS = 60000;
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.PowerPoint) {
@@ -40,15 +71,16 @@ Office.onReady((info) => {
 });
 
 async function init() {
+  restorePreferences();
   refreshBtn.addEventListener("click", () => loadLogos({ force: true }));
   searchInput.addEventListener("input", () => {
     updateSearchClear();
-    renderLogos(filterLogos());
+    scheduleSearch();
   });
   searchClear.addEventListener("click", () => {
     searchInput.value = "";
     updateSearchClear();
-    renderLogos(filterLogos());
+    scheduleSearch({ immediate: true });
     searchInput.focus();
   });
   if (keywordToggle) {
@@ -59,22 +91,120 @@ async function init() {
           : keywordFilterState === "with"
             ? "without"
             : "all";
+      persistKeywordFilter();
       syncKeywordToggle();
-      renderLogos(filterLogos());
+      scheduleSearch({ immediate: true });
     });
     syncKeywordToggle();
   }
   if (densityRange) {
     densityRange.addEventListener("input", () => {
-      updateGridColumns(Number(densityRange.value));
+      const value = Number(densityRange.value);
+      updateGridColumns(value);
+      persistDensity(value);
     });
     updateGridColumns(Number(densityRange.value));
+  }
+  if (grid) {
+    grid.addEventListener("click", handleGridClick);
+    grid.addEventListener("keydown", handleGridKeydown);
   }
   initZipDropzone();
 
   updateSearchClear();
   await hydrateLocalCacheMeta();
   await loadLogos();
+}
+
+function restorePreferences() {
+  const storedFilter = safeStorageGet(STORAGE_KEYS.keywordFilter);
+  if (storedFilter && ["all", "with", "without"].includes(storedFilter)) {
+    keywordFilterState = storedFilter;
+  }
+  if (densityRange) {
+    const storedDensity = Number.parseInt(
+      safeStorageGet(STORAGE_KEYS.density) || "",
+      10
+    );
+    if (Number.isFinite(storedDensity)) {
+      const clamped = Math.min(4, Math.max(1, storedDensity));
+      densityRange.value = String(clamped);
+    }
+  }
+}
+
+function persistKeywordFilter() {
+  safeStorageSet(STORAGE_KEYS.keywordFilter, keywordFilterState);
+}
+
+function persistDensity(value) {
+  if (!Number.isFinite(value)) return;
+  safeStorageSet(STORAGE_KEYS.density, String(value));
+}
+
+function safeStorageGet(key) {
+  try {
+    return window.localStorage ? window.localStorage.getItem(key) : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function safeStorageSet(key, value) {
+  try {
+    if (!window.localStorage) return;
+    window.localStorage.setItem(key, value);
+  } catch (error) {
+    // Ignore storage errors (private mode, quota).
+  }
+}
+
+function scheduleSearch(options = {}) {
+  const { immediate = false } = options;
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+  }
+  if (immediate) {
+    requestRender();
+    return;
+  }
+  searchTimer = setTimeout(() => {
+    searchTimer = null;
+    requestRender();
+  }, SEARCH_DEBOUNCE_MS);
+}
+
+function requestRender() {
+  if (renderFrame) {
+    cancelAnimationFrame(renderFrame);
+  }
+  renderFrame = requestAnimationFrame(() => {
+    renderFrame = null;
+    renderLogos(filterLogos());
+  });
+}
+
+function handleGridClick(event) {
+  const card = event.target.closest(".logo-card");
+  if (!card || !grid.contains(card)) return;
+  const logoId = Number(card.dataset.logoId);
+  const logo = logoById.get(logoId);
+  if (logo) {
+    insertLogo(logo);
+  }
+}
+
+function handleGridKeydown(event) {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const card = event.target.closest(".logo-card");
+  if (!card || !grid.contains(card)) return;
+  event.preventDefault();
+  const logoId = Number(card.dataset.logoId);
+  const logo = logoById.get(logoId);
+  if (logo) {
+    insertLogo(logo);
+  }
 }
 
 function initZipDropzone() {
@@ -127,13 +257,23 @@ function initZipDropzone() {
 async function hydrateLocalCacheMeta() {
   const record = await readZipCache();
   if (record && record.meta) {
-    localZipRecord = record;
+    localZipRecord = { meta: record.meta };
     updateZipMeta(record.meta);
   }
 }
 
+async function getZipRecordWithBuffer() {
+  if (localZipRecord && localZipRecord.buffer) {
+    return localZipRecord;
+  }
+  return await readZipCache();
+}
+
 async function loadLogos(options = {}) {
   const { force = false } = options;
+  if (force) {
+    keywordsPromise = null;
+  }
   await loadLocalLogos({ force });
 }
 
@@ -142,25 +282,29 @@ async function loadLocalLogos(options = {}) {
   setStatus("Chargement des logos locaux…");
   try {
     if (!localLogosCache || force) {
-      revokeLocalUrls();
-      const record = localZipRecord || await readZipCache();
+      clearLogoCaches();
+      resetZipSession();
+      const record = await getZipRecordWithBuffer();
       if (!record || !record.buffer) {
         renderEmptyState("Aucun ZIP local chargé. Glissez un fichier .zip pour commencer.");
         setStatus("Aucun ZIP local disponible.", "error");
         return;
       }
       localZipRecord = record;
-      const parsed = await parseZipBuffer(record.buffer);
+      const parsed = await loadZipBuffer(record.buffer);
       localLogosCache = parsed.items;
       const meta = buildZipMeta(record, localLogosCache.length);
-      localZipRecord.meta = meta;
+      localZipRecord = { meta };
       updateZipMeta(meta);
-      await saveZipCache(record.buffer, meta);
+      if (record.buffer) {
+        await saveZipCache(record.buffer, meta);
+      }
     }
     const map = await getKeywordsMap();
     keywordsMap = map;
     allLogos = attachKeywords(localLogosCache, keywordsMap);
-    renderLogos(filterLogos());
+    buildSearchIndex(allLogos);
+    requestRender();
     setStatus(allLogos.length ? "" : "Aucun logo SVG trouvé dans le ZIP local.");
   } catch (error) {
     console.error(error);
@@ -174,7 +318,7 @@ async function handleZipFile(file) {
     setStatus("Merci de sélectionner un fichier .zip contenant des SVG.", "error");
     return;
   }
-  if (typeof JSZip === "undefined") {
+  if (typeof JSZip === "undefined" && typeof Worker === "undefined") {
     setStatus("JSZip n'est pas chargé. Vérifiez la connexion réseau.", "error");
     return;
   }
@@ -183,8 +327,9 @@ async function handleZipFile(file) {
 
   try {
     const buffer = await file.arrayBuffer();
-    revokeLocalUrls();
-    const parsed = await parseZipBuffer(buffer);
+    clearLogoCaches();
+    resetZipSession();
+    const parsed = await loadZipBuffer(buffer);
     if (!parsed.items.length) {
       renderEmptyState("Aucun SVG trouvé dans le ZIP.");
       setStatus("Aucun SVG trouvé dans le ZIP.", "error");
@@ -196,7 +341,7 @@ async function handleZipFile(file) {
       count: parsed.items.length,
       updatedAt: Date.now()
     };
-    localZipRecord = { buffer, meta };
+    localZipRecord = { meta };
     localLogosCache = parsed.items;
     updateZipMeta(meta);
     await saveZipCache(buffer, meta);
@@ -212,36 +357,160 @@ async function handleZipFile(file) {
 }
 
 function filterLogos() {
-  const query = searchInput.value.trim().toLowerCase();
+  const query = normalizeSearchText(searchInput.value.trim());
+  const cacheKey = `${keywordFilterState}|${query}`;
+  const cached = searchCache.get(cacheKey);
+  if (cached) return cached;
 
-  return allLogos.filter((logo) => {
-    const matchesQuery = query
-      ? logo.name.toLowerCase().includes(query) ||
-        (logo.keywords || []).some((kw) => kw.toLowerCase().includes(query))
-      : true;
-    const matchesFilter =
-      keywordFilterState === "with"
-        ? logo.hasKeywords
-        : keywordFilterState === "without"
-          ? !logo.hasKeywords
-          : true;
-    return matchesQuery && matchesFilter;
+  let candidates = allLogos;
+
+  if (query) {
+    const tokens = tokenizeSearchText(query);
+    if (tokens.length) {
+      const sets = tokens.map((token) => tokenIndex.get(token)).filter(Boolean);
+      if (sets.length !== tokens.length) {
+        const empty = [];
+        cacheSearchResult(cacheKey, empty);
+        return empty;
+      }
+      const ids = intersectSets(sets);
+      candidates = [];
+      for (const id of ids) {
+        const logo = logoById.get(id);
+        if (logo) {
+          candidates.push(logo);
+        }
+      }
+    }
+    if (tokens.length) {
+      candidates = candidates.filter((logo) =>
+        tokens.every((token) => (logo.searchText || "").includes(token))
+      );
+    } else {
+      candidates = candidates.filter((logo) => (logo.searchText || "").includes(query));
+    }
+  }
+
+  const filtered = candidates.filter((logo) => {
+    if (keywordFilterState === "with") return logo.hasKeywords;
+    if (keywordFilterState === "without") return !logo.hasKeywords;
+    return true;
   });
+
+  cacheSearchResult(cacheKey, filtered);
+  return filtered;
 }
 
 function attachKeywords(items, map) {
   return items.map((logo) => {
     const keywords = map.get(logo.name) || [];
+    const searchText = buildSearchText(logo.name, keywords);
     return {
       ...logo,
       keywords,
-      hasKeywords: Array.isArray(keywords) && keywords.length > 0
+      hasKeywords: Array.isArray(keywords) && keywords.length > 0,
+      searchText
     };
   });
 }
 
+function buildSearchIndex(logos) {
+  logoById = new Map();
+  tokenIndex = new Map();
+  clearSearchCache();
+  logos.forEach((logo, index) => {
+    const id = Number.isFinite(logo.id) ? logo.id : index;
+    logo.id = id;
+    logoById.set(id, logo);
+    const tokens = tokenizeSearchText(logo.searchText || "");
+    const uniqueTokens = new Set(tokens);
+    for (const token of uniqueTokens) {
+      indexToken(token, id);
+    }
+  });
+}
+
+function indexToken(token, id) {
+  if (!token) return;
+  const maxLength = token.length;
+  if (maxLength <= MIN_SEARCH_PREFIX) {
+    addTokenToIndex(token, id);
+    return;
+  }
+  for (let len = MIN_SEARCH_PREFIX; len <= maxLength; len += 1) {
+    addTokenToIndex(token.slice(0, len), id);
+  }
+}
+
+function addTokenToIndex(token, id) {
+  if (!token) return;
+  let set = tokenIndex.get(token);
+  if (!set) {
+    set = new Set();
+    tokenIndex.set(token, set);
+  }
+  set.add(id);
+}
+
+function buildSearchText(name, keywords) {
+  const safeName = name || "";
+  const baseName = safeName.replace(/\.svg$/i, "");
+  const parts = [safeName];
+  if (baseName && baseName !== safeName) {
+    parts.push(baseName);
+  }
+  if (Array.isArray(keywords)) {
+    parts.push(...keywords);
+  }
+  return normalizeSearchText(parts.join(" "));
+}
+
+function normalizeSearchText(value) {
+  const text = String(value || "").toLowerCase();
+  if (!text) return "";
+  try {
+    return text
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  } catch (error) {
+    return text.replace(/[^a-z0-9]+/g, " ").trim();
+  }
+}
+
+function tokenizeSearchText(text) {
+  if (!text) return [];
+  return text.split(/\s+/).filter(Boolean);
+}
+
+function intersectSets(sets) {
+  if (!sets.length) return new Set();
+  const sorted = [...sets].sort((a, b) => a.size - b.size);
+  const [first, ...rest] = sorted;
+  const result = new Set();
+  for (const value of first) {
+    if (rest.every((set) => set.has(value))) {
+      result.add(value);
+    }
+  }
+  return result;
+}
+
+function cacheSearchResult(key, value) {
+  searchCache.set(key, value);
+  if (searchCache.size > SEARCH_CACHE_LIMIT) {
+    clearSearchCache();
+  }
+}
+
+function clearSearchCache() {
+  searchCache.clear();
+}
+
 function renderEmptyState(message) {
-  grid.innerHTML = "";
+  resetLazyObserver();
+  grid.replaceChildren();
   updateLogoCount(0);
   const empty = document.createElement("div");
   empty.className = "status";
@@ -250,47 +519,193 @@ function renderEmptyState(message) {
 }
 
 function renderLogos(logos) {
+  renderToken += 1;
+  const token = renderToken;
+  resetLazyObserver();
+
   if (!logos.length) {
     renderEmptyState("Aucun résultat pour cette recherche.");
     return;
   }
 
-  grid.innerHTML = "";
+  grid.replaceChildren();
   updateLogoCount(logos.length);
 
-  logos.forEach((logo, index) => {
-    const card = document.createElement("div");
-    card.className = "logo-card";
-    card.setAttribute("role", "button");
-    card.setAttribute("tabindex", "0");
-    card.setAttribute("aria-label", `Insérer ${logo.name}`);
-    card.style.animationDelay = `${index * 20}ms`;
+  let index = 0;
+  const total = logos.length;
 
-    const preview = document.createElement("div");
-    preview.className = "logo-preview";
+  const renderChunk = () => {
+    if (token !== renderToken) return;
+    const fragment = document.createDocumentFragment();
+    const end = Math.min(index + RENDER_BATCH_SIZE, total);
+    for (; index < end; index += 1) {
+      fragment.appendChild(createLogoCard(logos[index], index));
+    }
+    grid.appendChild(fragment);
+    if (index < total) {
+      requestAnimationFrame(renderChunk);
+    }
+  };
 
-    const img = document.createElement("img");
-    img.loading = "lazy";
-    img.src = logo.url;
-    img.alt = logo.name;
-    preview.appendChild(img);
-
-    card.appendChild(preview);
-
-    card.addEventListener("click", () => insertLogo(logo));
-    card.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        insertLogo(logo);
-      }
-    });
-
-    grid.appendChild(card);
-  });
+  renderChunk();
 }
 
-async function insertLogo(logo) {
+function createLogoCard(logo, index) {
+  const card = document.createElement("div");
+  card.className = "logo-card";
+  card.setAttribute("role", "button");
+  card.setAttribute("tabindex", "0");
+  card.setAttribute("aria-label", `Insérer ${logo.name}`);
+  card.style.animationDelay = `${index * 20}ms`;
+  card.dataset.logoId = String(logo.id ?? index);
+
+  const preview = document.createElement("div");
+  preview.className = "logo-preview";
+
+  const img = document.createElement("img");
+  img.loading = "lazy";
+  img.decoding = "async";
+  img.alt = logo.name;
+  if (logo.url) {
+    img.src = logo.url;
+  } else {
+    img.src = TRANSPARENT_PIXEL;
+    img.dataset.logoId = String(logo.id ?? index);
+    observeLazyImage(img);
+  }
+
+  preview.appendChild(img);
+  card.appendChild(preview);
+  return card;
+}
+
+function observeLazyImage(img) {
+  const observer = getLazyObserver();
+  if (!observer) {
+    loadLogoPreview(img);
+    return;
+  }
+  observer.observe(img);
+}
+
+function getLazyObserver() {
+  if (typeof IntersectionObserver === "undefined") {
+    return null;
+  }
+  if (lazyObserver) {
+    return lazyObserver;
+  }
+  lazyObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const target = entry.target;
+        lazyObserver.unobserve(target);
+        loadLogoPreview(target);
+      }
+    },
+    { root: null, rootMargin: LAZY_ROOT_MARGIN, threshold: 0.1 }
+  );
+  return lazyObserver;
+}
+
+function resetLazyObserver() {
+  if (lazyObserver) {
+    lazyObserver.disconnect();
+  }
+}
+
+function loadLogoPreview(img) {
+  if (!img || img.dataset.loading === "true") return;
+  const logoId = Number(img.dataset.logoId);
+  if (!Number.isFinite(logoId)) return;
+  const logo = logoById.get(logoId);
   if (!logo) return;
+  img.dataset.loading = "true";
+  ensureLogoUrl(logo)
+    .then((url) => {
+      if (!img.isConnected) return;
+      img.src = url;
+      img.removeAttribute("data-logo-id");
+    })
+    .catch((error) => {
+      console.error(error);
+    })
+    .finally(() => {
+      if (img.isConnected) {
+        img.removeAttribute("data-loading");
+      }
+    });
+}
+
+async function ensureLogoUrl(logo) {
+  if (logo.url) return logo.url;
+  if (logo.urlPromise) return logo.urlPromise;
+  logo.urlPromise = (async () => {
+    const svgText = await getSvgText(logo);
+    const url = createSvgUrl(svgText);
+    logo.url = url;
+    return url;
+  })();
+  try {
+    return await logo.urlPromise;
+  } finally {
+    logo.urlPromise = null;
+  }
+}
+
+async function getSvgText(logo) {
+  if (logo.svgText) return logo.svgText;
+  if (logo.svgPromise) return logo.svgPromise;
+  if (!logo.name) {
+    throw new Error("SVG introuvable en local.");
+  }
+  logo.svgPromise = fetchSvgTextFromZip(logo.name).then((text) => {
+    logo.svgText = text;
+    return text;
+  });
+  try {
+    return await logo.svgPromise;
+  } finally {
+    logo.svgPromise = null;
+  }
+}
+
+async function fetchSvgTextFromZip(name) {
+  const session = getZipSession();
+  if (!session || !session.getSvg) {
+    throw new Error("Lecteur ZIP indisponible.");
+  }
+  const result = await session.getSvg(name);
+  if (!result || !result.svgText) {
+    throw new Error("SVG introuvable en local.");
+  }
+  return result.svgText;
+}
+
+async function getPreparedSvg(logo) {
+  if (logo.normalizedSvg) return logo.normalizedSvg;
+  const svgText = await getSvgText(logo);
+  const normalized = normalizeSvg(svgText);
+  logo.normalizedSvg = normalized;
+  return normalized;
+}
+
+function insertLogo(logo) {
+  if (!logo) return Promise.resolve();
+  insertQueue = insertQueue
+    .then(() => insertLogoNow(logo))
+    .catch((error) => {
+      console.error(error);
+      setStatus(
+        `Erreur d'insertion : ${error.message || error}. Vérifiez que le SVG est valide.`,
+        "error"
+      );
+    });
+  return insertQueue;
+}
+
+async function insertLogoNow(logo) {
   if (!Office.context.requirements.isSetSupported("ImageCoercion", "1.2")) {
     setStatus(
       "Votre version de PowerPoint ne supporte pas l'insertion SVG (ImageCoercion 1.2).",
@@ -301,12 +716,9 @@ async function insertLogo(logo) {
   setStatus(`Insertion de ${logo.name}…`);
 
   try {
-    if (!logo.svgText) {
-      throw new Error("SVG introuvable en local.");
-    }
-    const svg = normalizeSvg(logo.svgText);
-    await forceSlideSelection();
-    await insertSvg(svg);
+    const svg = await getPreparedSvg(logo);
+    const position = await getNextInsertPosition();
+    await insertSvg(svg, position);
 
     setStatus(`Logo inséré : ${logo.name}`, "success");
   } catch (error) {
@@ -330,11 +742,17 @@ function setSelectedData(data, options) {
   });
 }
 
-async function insertSvg(svg) {
+async function insertSvg(svg, position = {}) {
+  const left = Number.isFinite(position.imageLeft)
+    ? position.imageLeft
+    : INSERT_BASE_POSITION.left;
+  const top = Number.isFinite(position.imageTop)
+    ? position.imageTop
+    : INSERT_BASE_POSITION.top;
   const options = {
     coercionType: Office.CoercionType.XmlSvg,
-    imageLeft: 48,
-    imageTop: 48
+    imageLeft: left,
+    imageTop: top
   };
 
   try {
@@ -347,6 +765,40 @@ async function insertSvg(svg) {
     }
     throw error;
   }
+}
+
+async function getNextInsertPosition() {
+  const slideId = await getCachedSlideId();
+  const key = slideId || "default";
+  const state = getInsertState(key);
+  const position = {
+    imageLeft: INSERT_BASE_POSITION.left + state.offsetIndex * INSERT_OFFSET_STEP.x,
+    imageTop: INSERT_BASE_POSITION.top + state.offsetIndex * INSERT_OFFSET_STEP.y
+  };
+  state.offsetIndex = (state.offsetIndex + 1) % INSERT_OFFSET_STEPS;
+  state.lastUsedAt = Date.now();
+  insertStateBySlide.set(key, state);
+  return position;
+}
+
+function getInsertState(key) {
+  const now = Date.now();
+  const existing = insertStateBySlide.get(key);
+  if (!existing || now - existing.lastUsedAt > INSERT_RESET_MS) {
+    return { offsetIndex: 0, lastUsedAt: now };
+  }
+  return existing;
+}
+
+async function getCachedSlideId() {
+  const now = Date.now();
+  if (cachedSlideId && now - cachedSlideIdAt < SLIDE_ID_CACHE_MS) {
+    return cachedSlideId;
+  }
+  const slideId = await getSelectedSlideId();
+  cachedSlideId = slideId || null;
+  cachedSlideIdAt = now;
+  return slideId;
 }
 
 function isSelectionError(error) {
@@ -375,6 +827,9 @@ async function forceSlideSelection() {
 }
 
 async function getSelectedSlideId() {
+  if (typeof PowerPoint === "undefined" || typeof PowerPoint.run !== "function") {
+    return null;
+  }
   let slideId = null;
   await PowerPoint.run(async (context) => {
     const slides = context.presentation.getSelectedSlides();
@@ -388,6 +843,8 @@ async function getSelectedSlideId() {
     await context.sync();
     slideId = slide.id;
   });
+  cachedSlideId = slideId || null;
+  cachedSlideIdAt = Date.now();
   return slideId;
 }
 
@@ -410,7 +867,7 @@ function getKeywordsMap() {
 
 async function fetchKeywords() {
   try {
-    const response = await fetch("keywords.json", { cache: "no-store" });
+    const response = await fetch("keywords.json", { cache: "force-cache" });
     if (!response.ok) {
       return new Map();
     }
@@ -470,20 +927,130 @@ function updateLogoCount(count) {
 }
 
 function revokeLocalUrls() {
+  resetLazyObserver();
   for (const url of localObjectUrls) {
     URL.revokeObjectURL(url);
   }
   localObjectUrls.clear();
 }
 
-async function parseZipBuffer(buffer) {
-  if (typeof JSZip === "undefined") {
-    throw new Error("JSZip indisponible.");
-  }
+function clearLogoCaches() {
+  revokeLocalUrls();
+  clearSearchCache();
+  allLogos = [];
+  logoById = new Map();
+  tokenIndex = new Map();
+  localLogosCache = null;
+}
 
-  const zip = await JSZip.loadAsync(buffer);
-  const svgEntries = [];
+async function loadZipBuffer(buffer) {
+  const session = getZipSession();
+  if (!session) {
+    throw new Error("Impossible d'initialiser le lecteur ZIP.");
+  }
+  const useWorker = session.type === "worker";
+  const payload = useWorker ? buffer.slice(0) : buffer;
+  try {
+    return await session.load(payload);
+  } catch (error) {
+    if (useWorker) {
+      console.warn("ZIP worker indisponible, repli sur le thread principal.", error);
+      resetZipSession({ terminate: true });
+      zipSession = createMainZipSession();
+      return await zipSession.load(buffer);
+    }
+    throw error;
+  }
+}
+
+function getZipSession() {
+  if (zipSession) {
+    return zipSession;
+  }
+  if (typeof Worker !== "undefined") {
+    try {
+      zipSession = createWorkerZipSession();
+      return zipSession;
+    } catch (error) {
+      console.warn("Impossible d'initialiser le worker ZIP.", error);
+    }
+  }
+  zipSession = createMainZipSession();
+  return zipSession;
+}
+
+function resetZipSession(options = {}) {
+  const { terminate = false } = options;
+  if (!zipSession) return;
+  if (zipSession.reset) {
+    try {
+      zipSession.reset();
+    } catch (error) {
+      // Ignore reset errors.
+    }
+  }
+  if (terminate && zipSession.terminate) {
+    zipSession.terminate();
+  }
+  zipSession = null;
+}
+
+function createWorkerZipSession() {
+  if (!zipWorker) {
+    zipWorker = new Worker("zip-worker.js");
+    zipWorker.onmessage = handleZipWorkerMessage;
+    zipWorker.onerror = handleZipWorkerError;
+  }
+  return {
+    type: "worker",
+    load: (buffer) => postZipWorkerMessage("loadZip", { buffer }, buffer),
+    getSvg: (name) => postZipWorkerMessage("getSvg", { name }),
+    reset: () => postZipWorkerMessage("reset", {}).catch(() => {}),
+    terminate: () => {
+      zipWorker.terminate();
+      zipWorker = null;
+      rejectZipWorkerRequests(new Error("Worker terminé."));
+    }
+  };
+}
+
+function createMainZipSession() {
+  let zip = null;
+  let entryMap = new Map();
+  return {
+    type: "main",
+    async load(buffer) {
+      if (typeof JSZip === "undefined") {
+        throw new Error("JSZip indisponible.");
+      }
+      zip = await JSZip.loadAsync(buffer);
+      const result = collectZipEntries(zip);
+      entryMap = result.entryMap;
+      return { items: result.items, stats: result.stats };
+    },
+    async getSvg(name) {
+      if (!zip) {
+        throw new Error("ZIP non chargé.");
+      }
+      const entryName = entryMap.get(name);
+      if (!entryName) {
+        throw new Error("SVG introuvable dans le ZIP.");
+      }
+      const svgText = await zip.file(entryName).async("text");
+      return { name, svgText };
+    },
+    reset() {
+      zip = null;
+      entryMap = new Map();
+    }
+  };
+}
+
+function collectZipEntries(zip) {
+  const items = [];
+  const entryMap = new Map();
   let ignored = 0;
+  let duplicates = 0;
 
   zip.forEach((_, entry) => {
     if (entry.dir) {
@@ -493,45 +1060,86 @@ async function parseZipBuffer(buffer) {
       ignored += 1;
       return;
     }
-    svgEntries.push(entry);
-  });
-
-  const items = [];
-  const seen = new Set();
-  let duplicates = 0;
-
-  for (const entry of svgEntries) {
     const name = extractFileName(entry.name);
     if (!name) {
       ignored += 1;
-      continue;
+      return;
     }
-    if (seen.has(name)) {
+    if (entryMap.has(name)) {
       duplicates += 1;
-      continue;
+      return;
     }
-    seen.add(name);
-    const svgText = await entry.async("text");
-    const url = createSvgUrl(svgText);
+    entryMap.set(name, entry.name);
     items.push({
+      id: 0,
       name,
       ext: "svg",
-      url,
-      svgText,
+      url: null,
+      svgText: null,
+      normalizedSvg: null,
       source: "local"
     });
-  }
+  });
 
   items.sort((a, b) => a.name.localeCompare(b.name));
+  items.forEach((item, index) => {
+    item.id = index;
+  });
 
   return {
     items,
+    entryMap,
     stats: {
       total: items.length,
       duplicates,
       ignored
     }
   };
+}
+
+function postZipWorkerMessage(type, payload, transfer) {
+  return new Promise((resolve, reject) => {
+    if (!zipWorker) {
+      reject(new Error("Worker ZIP indisponible."));
+      return;
+    }
+    const id = ++zipWorkerRequestId;
+    zipWorkerRequests.set(id, { resolve, reject });
+    try {
+      if (transfer) {
+        zipWorker.postMessage({ id, type, payload }, [transfer]);
+      } else {
+        zipWorker.postMessage({ id, type, payload });
+      }
+    } catch (error) {
+      zipWorkerRequests.delete(id);
+      reject(error);
+    }
+  });
+}
+
+function handleZipWorkerMessage(event) {
+  const { id, ok, payload, error } = event.data || {};
+  const pending = zipWorkerRequests.get(id);
+  if (!pending) return;
+  zipWorkerRequests.delete(id);
+  if (ok) {
+    pending.resolve(payload);
+  } else {
+    pending.reject(new Error(error?.message || "Erreur worker ZIP."));
+  }
+}
+
+function handleZipWorkerError(event) {
+  const error = event?.message
+    ? new Error(event.message)
+    : new Error("Erreur du worker ZIP.");
+  rejectZipWorkerRequests(error);
+}
+
+function rejectZipWorkerRequests(error) {
+  zipWorkerRequests.forEach(({ reject }) => reject(error));
+  zipWorkerRequests.clear();
 }
 
 function extractFileName(filePath) {
