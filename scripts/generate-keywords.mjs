@@ -11,6 +11,10 @@ const tmpDir = path.join(root, ".tmp", "raster");
 const model = process.env.GEMINI_MODEL || "gemini-flash-lite-latest";
 const apiKey = process.env.GEMINI_API_KEY;
 const force = process.env.FORCE === "1";
+const concurrency = Math.max(
+  1,
+  Number.parseInt(process.env.CONCURRENCY || "5", 10) || 5
+);
 
 if (!apiKey) {
   console.error("Missing GEMINI_API_KEY.");
@@ -51,14 +55,22 @@ const existingMap = new Map(
   (existing.items || []).map((item) => [item.file, item])
 );
 
-const results = [];
+const results = new Array(svgFiles.length).fill(null);
+const tasks = [];
 
-for (const file of svgFiles) {
+svgFiles.forEach((file, index) => {
   if (!force && existingMap.has(file)) {
-    results.push(existingMap.get(file));
-    continue;
+    results[index] = existingMap.get(file);
+    return;
   }
+  tasks.push({ file, index });
+});
 
+if (tasks.length) {
+  console.log(`Processing ${tasks.length} new file(s) with concurrency ${concurrency}.`);
+}
+
+await runPool(tasks, concurrency, async ({ file, index }) => {
   const svgPath = path.join(logosDir, file);
   const pngPath = path.join(tmpDir, file.replace(/\\.svg$/i, ".png"));
 
@@ -74,7 +86,7 @@ for (const file of svgFiles) {
     ]);
   } catch (error) {
     console.error(`Failed to rasterize ${file}:`, error.message || error);
-    continue;
+    return;
   }
 
   const base64 = fs.readFileSync(pngPath, "base64");
@@ -83,22 +95,21 @@ for (const file of svgFiles) {
     text = await callGeminiWithRetry(model, apiKey, prompt, base64);
   } catch (error) {
     console.error(`Gemini failed for ${file}:`, error.message || error);
-    continue;
+    return;
   }
 
   const keywords = parseKeywords(text);
-
-  results.push({
+  results[index] = {
     file,
     keywords,
     raw: text
-  });
-}
+  };
+});
 
 const payload = {
   generatedAt: new Date().toISOString(),
   model,
-  items: results
+  items: results.filter(Boolean)
 };
 
 fs.writeFileSync(outputPath, JSON.stringify(payload, null, 2));
@@ -184,4 +195,20 @@ function parseKeywords(text) {
     unique.push(item);
   }
   return unique;
+}
+
+async function runPool(items, limit, worker) {
+  if (!items.length) return;
+  const queue = items.slice();
+  const workers = Array.from(
+    { length: Math.min(limit, queue.length) },
+    async () => {
+      while (queue.length) {
+        const item = queue.shift();
+        if (!item) return;
+        await worker(item);
+      }
+    }
+  );
+  await Promise.all(workers);
 }
