@@ -1,0 +1,288 @@
+:root {
+  --bg: #f6efe7;
+  --bg-accent: #f9f4ec;
+  --ink: #1d1c1a;
+  --muted: #6f6860;
+  --accent: #ef6f54;
+  --accent-dark: #d85c43;
+  --teal: #0c6b6d;
+  --card: #ffffff;
+  --card-shadow: rgba(20, 16, 12, 0.12);
+  --border: rgba(31, 25, 19, 0.1);
+  --radius: 16px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Public Sans", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 600px at -10% -20%, #fff7ec 0%, transparent 60%),
+    radial-gradient(800px 400px at 120% 0%, #ffe4cf 0%, transparent 55%),
+    linear-gradient(135deg, var(--bg) 0%, var(--bg-accent) 100%);
+  min-height: 100vh;
+}
+
+.app {
+  padding: 20px 18px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  animation: fadeIn 500ms ease-out;
+}
+
+.brand {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.brand-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--teal));
+  box-shadow: 0 0 0 6px rgba(239, 111, 84, 0.15);
+}
+
+h1 {
+  margin: 0;
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  font-size: 20px;
+  letter-spacing: 0.3px;
+}
+
+.header p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stats {
+  font-size: 12px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.7);
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.search {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 180px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.search input {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #fffdf8;
+  font-size: 13px;
+  transition: border 200ms ease, box-shadow 200ms ease;
+}
+
+.search input:focus {
+  outline: none;
+  border-color: rgba(239, 111, 84, 0.6);
+  box-shadow: 0 0 0 3px rgba(239, 111, 84, 0.15);
+}
+
+button {
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  transition: transform 120ms ease, box-shadow 200ms ease;
+}
+
+button.ghost {
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--ink);
+  border: 1px solid var(--border);
+}
+
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(31, 25, 19, 0.15);
+}
+
+.drop-zone {
+  border: 2px dashed rgba(12, 107, 109, 0.35);
+  border-radius: var(--radius);
+  padding: 16px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--teal);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border 200ms ease, background 200ms ease, transform 200ms ease;
+}
+
+.drop-zone.active {
+  border-color: var(--accent);
+  background: rgba(239, 111, 84, 0.12);
+  transform: scale(1.01);
+}
+
+.drop-zone.over {
+  border-color: var(--accent-dark);
+  background: rgba(239, 111, 84, 0.18);
+}
+
+.status {
+  min-height: 18px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.status.success {
+  color: var(--teal);
+}
+
+.status.error {
+  color: #b23a2f;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 12px;
+}
+
+.logo-card {
+  background: var(--card);
+  border-radius: 14px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 20px var(--card-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 200ms ease, border 200ms ease;
+  animation: riseIn 500ms ease-out both;
+}
+
+.logo-card:focus {
+  outline: 2px solid rgba(12, 107, 109, 0.4);
+  outline-offset: 2px;
+}
+
+.logo-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(12, 107, 109, 0.4);
+  box-shadow: 0 16px 30px rgba(31, 25, 19, 0.18);
+}
+
+.logo-preview {
+  height: 72px;
+  border-radius: 10px;
+  background: #f4f1ec;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.logo-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.logo-preview.placeholder {
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  font-size: 18px;
+  color: rgba(12, 107, 109, 0.7);
+  letter-spacing: 1px;
+}
+
+.logo-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.logo-name {
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.logo-ext {
+  font-size: 9px;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: rgba(12, 107, 109, 0.1);
+  padding: 2px 6px;
+  border-radius: 999px;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 520px) {
+  .app {
+    padding: 16px 14px 20px;
+  }
+
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

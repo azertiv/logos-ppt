@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Logos PPT</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;600&family=Space+Grotesk:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="taskpane.css" />
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <div class="brand">
+          <span class="brand-dot"></span>
+          <div>
+            <h1>Atelier Pictos</h1>
+            <p>Glissez, cliquez, illustrez vos slides.</p>
+          </div>
+        </div>
+        <div class="stats">
+          <span id="logo-count">0 logos</span>
+        </div>
+      </header>
+
+      <section class="controls">
+        <label class="search">
+          <span>Recherche</span>
+          <input id="search-input" type="search" placeholder="Tapez un mot-clé…" />
+        </label>
+        <button id="refresh-btn" class="ghost">Rafraîchir</button>
+      </section>
+
+      <section id="drop-zone" class="drop-zone" aria-live="polite">
+        <strong>Déposer ici</strong>
+        <span>ou cliquez sur un pictogramme pour l'insérer</span>
+      </section>
+
+      <section id="status" class="status" aria-live="polite"></section>
+
+      <section class="grid" id="logo-grid" aria-live="polite"></section>
+    </div>
+
+    <script src="taskpane.js"></script>
+  </body>
+</html>

@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+  xsi:type="TaskPaneApp">
+  <Id>2111ce12-a6c7-472b-b619-63d93eff5bc0</Id>
+  <Version>0.1.0.0</Version>
+  <ProviderName>Logos PPT</ProviderName>
+  <DefaultLocale>fr-FR</DefaultLocale>
+  <DisplayName DefaultValue="Atelier Pictos" />
+  <Description DefaultValue="Recherchez et insérez des pictogrammes dans vos slides." />
+  <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png" />
+  <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-128.png" />
+  <SupportUrl DefaultValue="https://localhost:3000" />
+
+  <Hosts>
+    <Host Name="Presentation" />
+  </Hosts>
+
+  <Requirements>
+    <Sets DefaultMinVersion="1.1">
+      <Set Name="PowerPointApi" MinVersion="1.1" />
+    </Sets>
+  </Requirements>
+
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://localhost:3000/taskpane.html" />
+  </DefaultSettings>
+
+  <Permissions>ReadWriteDocument</Permissions>
+
+  <VersionOverrides xsi:type="ov:VersionOverridesV1_1">
+    <Hosts>
+      <Host xsi:type="ov:Presentation">
+        <DesktopFormFactor>
+          <ExtensionPoint xsi:type="ov:PrimaryCommandSurface">
+            <OfficeTab id="TabHome">
+              <Group id="Pictos.Group">
+                <Label resid="Pictos.GroupLabel" />
+                <Icon>
+                  <bt:Image size="16" resid="Pictos.Icon16" />
+                  <bt:Image size="32" resid="Pictos.Icon32" />
+                  <bt:Image size="80" resid="Pictos.Icon80" />
+                </Icon>
+                <Control xsi:type="ov:Button" id="Pictos.Button">
+                  <Label resid="Pictos.ButtonLabel" />
+                  <Supertip>
+                    <Title resid="Pictos.ButtonLabel" />
+                    <Description resid="Pictos.ButtonDescription" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Pictos.Icon16" />
+                    <bt:Image size="32" resid="Pictos.Icon32" />
+                    <bt:Image size="80" resid="Pictos.Icon80" />
+                  </Icon>
+                  <Action xsi:type="ov:ShowTaskpane">
+                    <TaskpaneId>ButtonTaskpane</TaskpaneId>
+                    <SourceLocation resid="Pictos.TaskpaneUrl" />
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+
+    <Resources>
+      <bt:Images>
+        <bt:Image id="Pictos.Icon16" DefaultValue="https://localhost:3000/assets/icon-32.png" />
+        <bt:Image id="Pictos.Icon32" DefaultValue="https://localhost:3000/assets/icon-32.png" />
+        <bt:Image id="Pictos.Icon80" DefaultValue="https://localhost:3000/assets/icon-80.png" />
+      </bt:Images>
+      <bt:Urls>
+        <bt:Url id="Pictos.TaskpaneUrl" DefaultValue="https://localhost:3000/taskpane.html" />
+      </bt:Urls>
+      <bt:ShortStrings>
+        <bt:String id="Pictos.GroupLabel" DefaultValue="Pictogrammes" />
+        <bt:String id="Pictos.ButtonLabel" DefaultValue="Atelier Pictos" />
+      </bt:ShortStrings>
+      <bt:LongStrings>
+        <bt:String
+          id="Pictos.ButtonDescription"
+          DefaultValue="Parcourez votre base de logos et insérez-les dans la slide active."
+        />
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>
