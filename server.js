@@ -15,16 +15,7 @@ app.use("/", express.static(publicDir));
 app.use("/media", express.static(mediaDir));
 
 app.get("/logos.json", (req, res) => {
-  const allowed = new Set([
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".svg",
-    ".emf",
-    ".bmp",
-    ".webp"
-  ]);
+  const allowed = new Set([".svg"]);
 
   let items = [];
   if (fs.existsSync(logosDir)) {

@@ -7,7 +7,7 @@ const mediaDir = path.join(root, "media", "logos");
 const distDir = path.join(root, "dist");
 const distMediaDir = path.join(distDir, "media", "logos");
 
-const allowed = new Set([".png", ".jpg", ".jpeg", ".gif", ".svg", ".emf", ".bmp", ".webp"]);
+const allowed = new Set([".svg"]);
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });

@@ -86,16 +86,11 @@ function renderLogos(logos) {
     const preview = document.createElement("div");
     preview.className = "logo-preview";
 
-    if (logo.ext === "emf") {
-      preview.classList.add("placeholder");
-      preview.textContent = "EMF";
-    } else {
-      const img = document.createElement("img");
-      img.loading = "lazy";
-      img.src = logo.url;
-      img.alt = logo.name;
-      preview.appendChild(img);
-    }
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.src = logo.url;
+    img.alt = logo.name;
+    preview.appendChild(img);
 
     const meta = document.createElement("div");
     meta.className = "logo-meta";
@@ -106,7 +101,7 @@ function renderLogos(logos) {
 
     const ext = document.createElement("span");
     ext.className = "logo-ext";
-    ext.textContent = logo.ext || "?";
+    ext.textContent = "svg";
 
     meta.appendChild(name);
     meta.appendChild(ext);
@@ -140,23 +135,27 @@ function renderLogos(logos) {
 
 async function insertLogo(logo) {
   if (!logo) return;
+  if (!Office.context.requirements.isSetSupported("ImageCoercion", "1.2")) {
+    setStatus(
+      "Votre version de PowerPoint ne supporte pas l'insertion SVG (ImageCoercion 1.2).",
+      "error"
+    );
+    return;
+  }
   setStatus(`Insertion de ${logo.name}…`);
 
   try {
-    if (logo.ext === "svg") {
-      const svgText = await fetch(logo.url).then((res) => res.text());
-      const svgBase64 = toBase64(svgText);
-      await setSelectedData(svgBase64, { coercionType: Office.CoercionType.XmlSvg });
-    } else {
-      const blob = await fetch(logo.url).then((res) => res.blob());
-      const base64 = await blobToBase64(blob);
-      await setSelectedData(base64, { coercionType: Office.CoercionType.Image });
-    }
+    const svgText = await fetch(logo.url).then((res) => res.text());
+    const svg = normalizeSvg(svgText);
+    await setSelectedData(svg, { coercionType: Office.CoercionType.XmlSvg });
 
     setStatus(`Logo inséré : ${logo.name}`, "success");
   } catch (error) {
     console.error(error);
-    setStatus(`Erreur d'insertion : ${error.message || error}`, "error");
+    setStatus(
+      `Erreur d'insertion : ${error.message || error}. Vérifiez que le SVG est valide.`,
+      "error"
+    );
   }
 }
 
@@ -172,21 +171,17 @@ function setSelectedData(data, options) {
   });
 }
 
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result || "";
-      const comma = dataUrl.indexOf(",");
-      resolve(comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl);
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-}
-
-function toBase64(text) {
-  return btoa(unescape(encodeURIComponent(text)));
+function normalizeSvg(text) {
+  let svg = text.replace(/^\uFEFF/, "").trim();
+  svg = svg.replace(/<\?xml[^>]*>\s*/i, "");
+  svg = svg.replace(/<!DOCTYPE[^>]*>\s*/i, "");
+  if (!/xmlns=/.test(svg)) {
+    svg = svg.replace(
+      /<svg(\s|>)/i,
+      '<svg xmlns=\"http://www.w3.org/2000/svg\"$1'
+    );
+  }
+  return svg;
 }
 
 function setStatus(message, tone = "") {
