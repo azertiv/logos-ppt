@@ -45,7 +45,7 @@ function init() {
 async function loadLogos() {
   setStatus("Chargement des pictogrammes…");
   try {
-    const response = await fetch("/logos.json", { cache: "no-store" });
+    const response = await fetch("logos.json", { cache: "no-store" });
     const data = await response.json();
     allLogos = data.items || [];
     logoCount.textContent = `${data.count || allLogos.length} logos`;

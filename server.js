@@ -34,7 +34,7 @@ app.get("/logos.json", (req, res) => {
       .map((file) => ({
         name: file,
         ext: path.extname(file).toLowerCase().replace(".", ""),
-        url: `/media/logos/${encodeURIComponent(file)}`
+        url: `media/logos/${encodeURIComponent(file)}`
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }

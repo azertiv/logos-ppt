@@ -5,6 +5,7 @@
   "description": "Office.js PowerPoint add-in to browse and insert pictogram logos.",
   "scripts": {
     "start": "node server.js",
+    "build:pages": "node scripts/build-pages.js",
     "dev-certs": "npx office-addin-dev-certs install --days 365",
     "verify-certs": "npx office-addin-dev-certs verify"
   },
