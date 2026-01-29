@@ -6,9 +6,11 @@ const searchInput = document.getElementById("search-input");
 const refreshBtn = document.getElementById("refresh-btn");
 const dropZone = document.getElementById("drop-zone");
 const logoCount = document.getElementById("logo-count");
+const keywordFilter = document.getElementById("keyword-filter");
 
 let allLogos = [];
 let draggingLogo = null;
+let keywordsMap = new Map();
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.PowerPoint) {
@@ -22,6 +24,7 @@ Office.onReady((info) => {
 function init() {
   refreshBtn.addEventListener("click", () => loadLogos());
   searchInput.addEventListener("input", () => renderLogos(filterLogos()));
+  keywordFilter.addEventListener("change", () => renderLogos(filterLogos()));
 
   dropZone.addEventListener("dragover", (event) => {
     event.preventDefault();
@@ -45,9 +48,20 @@ function init() {
 async function loadLogos() {
   setStatus("Chargement des pictogrammes…");
   try {
-    const response = await fetch("logos.json", { cache: "no-store" });
+    const [response, map] = await Promise.all([
+      fetch("logos.json", { cache: "no-store" }),
+      loadKeywords()
+    ]);
     const data = await response.json();
-    allLogos = data.items || [];
+    keywordsMap = map;
+    allLogos = (data.items || []).map((logo) => {
+      const keywords = keywordsMap.get(logo.name) || [];
+      return {
+        ...logo,
+        keywords,
+        hasKeywords: Array.isArray(keywords) && keywords.length > 0
+      };
+    });
     logoCount.textContent = `${data.count || allLogos.length} logos`;
     renderLogos(filterLogos());
     setStatus(allLogos.length ? "" : "Aucun logo trouvé dans media/logos.");
@@ -59,8 +73,18 @@ async function loadLogos() {
 
 function filterLogos() {
   const query = searchInput.value.trim().toLowerCase();
-  if (!query) return allLogos;
-  return allLogos.filter((logo) => logo.name.toLowerCase().includes(query));
+  const filter = keywordFilter.value;
+
+  return allLogos.filter((logo) => {
+    const matchesQuery = query ? logo.name.toLowerCase().includes(query) : true;
+    const matchesFilter =
+      filter === "with"
+        ? logo.hasKeywords
+        : filter === "without"
+          ? !logo.hasKeywords
+          : true;
+    return matchesQuery && matchesFilter;
+  });
 }
 
 function renderLogos(logos) {
@@ -77,6 +101,7 @@ function renderLogos(logos) {
   logos.forEach((logo, index) => {
     const card = document.createElement("div");
     card.className = "logo-card";
+    card.classList.add(logo.hasKeywords ? "has-keywords" : "no-keywords");
     card.setAttribute("role", "button");
     card.setAttribute("tabindex", "0");
     card.setAttribute("aria-label", `Insérer ${logo.name}`);
@@ -169,6 +194,26 @@ function setSelectedData(data, options) {
       }
     });
   });
+}
+
+async function loadKeywords() {
+  try {
+    const response = await fetch("keywords.json", { cache: "no-store" });
+    if (!response.ok) {
+      return new Map();
+    }
+    const data = await response.json();
+    const items = Array.isArray(data.items) ? data.items : [];
+    const map = new Map();
+    for (const item of items) {
+      if (item?.file) {
+        map.set(item.file, Array.isArray(item.keywords) ? item.keywords : []);
+      }
+    }
+    return map;
+  } catch (error) {
+    return new Map();
+  }
 }
 
 function normalizeSvg(text) {
