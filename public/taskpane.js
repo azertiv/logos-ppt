@@ -10,6 +10,10 @@ const keywordToggle = document.getElementById("keyword-toggle");
 const densityRange = document.getElementById("density-range");
 const densityValue = document.getElementById("density-value");
 const sortSelect = document.getElementById("sort-select");
+const zipArea = document.getElementById("zip-area");
+const zipSummary = document.getElementById("zip-summary");
+const zipToggle = document.getElementById("zip-toggle");
+const zipStatusText = document.getElementById("zip-status-text");
 const zipDrop = document.getElementById("zip-drop");
 const zipInput = document.getElementById("zip-input");
 const zipButton = document.getElementById("zip-button");
@@ -37,6 +41,8 @@ let zipSession = null;
 let zipWorker = null;
 let zipWorkerRequestId = 0;
 const zipWorkerRequests = new Map();
+let zipPanelExpanded = true;
+let zipPanelToggled = false;
 let insertQueue = Promise.resolve();
 let cachedSlideId = null;
 let cachedSlideIdAt = 0;
@@ -143,6 +149,7 @@ async function init() {
     grid.addEventListener("keydown", handleGridKeydown);
   }
   initZipDropzone();
+  initZipSummaryToggle();
 
   updateSearchClear();
   await hydrateLocalCacheMeta();
@@ -381,6 +388,32 @@ function initZipDropzone() {
       await handleZipFile(file);
     }
   });
+}
+
+function initZipSummaryToggle() {
+  if (!zipToggle) return;
+  zipToggle.addEventListener("click", () => {
+    const expanded = zipToggle.getAttribute("aria-expanded") === "true";
+    setZipPanelExpanded(!expanded, { userInitiated: true });
+  });
+}
+
+function setZipPanelExpanded(isExpanded, options = {}) {
+  if (zipArea) {
+    zipArea.classList.toggle("is-collapsed", !isExpanded);
+  }
+  if (zipToggle) {
+    zipToggle.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+  }
+  zipPanelExpanded = isExpanded;
+  if (options.userInitiated) {
+    zipPanelToggled = true;
+  }
+}
+
+function setZipSummaryVisible(hasMeta) {
+  if (!zipSummary) return;
+  zipSummary.classList.toggle("hidden", !hasMeta);
 }
 
 async function hydrateLocalCacheMeta() {
@@ -814,7 +847,6 @@ function renderLogos(logos) {
     (max, logo) => Math.max(max, logo.relevanceScore || 0),
     0
   );
-  const queryActive = normalizeSearchText(searchInput.value.trim()).length > 0;
 
   let index = 0;
   const total = logos.length;
@@ -824,7 +856,7 @@ function renderLogos(logos) {
     const fragment = document.createDocumentFragment();
     const end = Math.min(index + RENDER_BATCH_SIZE, total);
     for (; index < end; index += 1) {
-      fragment.appendChild(createLogoCard(logos[index], index, maxScore, queryActive));
+      fragment.appendChild(createLogoCard(logos[index], index, maxScore));
     }
     grid.appendChild(fragment);
     if (index < total) {
@@ -835,7 +867,7 @@ function renderLogos(logos) {
   renderChunk();
 }
 
-function createLogoCard(logo, index, maxScore, queryActive) {
+function createLogoCard(logo, index, maxScore) {
   const card = document.createElement("div");
   card.className = "logo-card";
   if (logo.isFavorite) {
@@ -848,18 +880,11 @@ function createLogoCard(logo, index, maxScore, queryActive) {
   card.dataset.logoId = String(logo.id ?? index);
   const score = Number(logo.relevanceScore) || 0;
   const normalized = maxScore > 0 ? Math.min(1, score / maxScore) : 0;
-  const baseAlpha = maxScore > 0 ? 0.08 : 0.04;
-  const alpha = baseAlpha + normalized * 0.45;
-  const alphaStrong = baseAlpha + normalized * 0.7;
+  const baseAlpha = maxScore > 0 ? 0.12 : 0.05;
+  const alpha = baseAlpha + normalized * 0.38;
+  const alphaStrong = baseAlpha + normalized * 0.58;
   card.style.setProperty("--relevance-alpha", alpha.toFixed(3));
   card.style.setProperty("--relevance-alpha-strong", alphaStrong.toFixed(3));
-
-  if (queryActive) {
-    const scoreBadge = document.createElement("div");
-    scoreBadge.className = "score-badge";
-    scoreBadge.textContent = String(Math.round(score));
-    card.appendChild(scoreBadge);
-  }
 
   const favButton = document.createElement("button");
   favButton.type = "button";
@@ -1059,16 +1084,24 @@ async function getReplaceSelectionTarget() {
         return;
       }
       const shapes = context.presentation.getSelectedShapes();
+      const slides = context.presentation.getSelectedSlides();
       shapes.load("items");
+      slides.load("items");
       await context.sync();
       if (!shapes.items || shapes.items.length !== 1) {
         return;
       }
+      const slide = slides.items && slides.items[0] ? slides.items[0] : null;
+      if (!slide) {
+        return;
+      }
       const shape = shapes.items[0];
       shape.load(["id", "left", "top", "width", "height"]);
+      slide.load("id");
       await context.sync();
       info = {
         shapeId: shape.id,
+        slideId: slide.id,
         imageLeft: shape.left,
         imageTop: shape.top,
         imageWidth: shape.width,
@@ -1082,15 +1115,13 @@ async function getReplaceSelectionTarget() {
   return info;
 }
 
-async function deleteShapeById(shapeId) {
-  if (!shapeId) return;
+async function deleteShapeById(shapeId, slideId) {
+  if (!shapeId || !slideId) return;
   if (typeof PowerPoint === "undefined" || typeof PowerPoint.run !== "function") {
     return;
   }
   try {
     await PowerPoint.run(async (context) => {
-      const slideId = await getSelectedSlideId();
-      if (!slideId) return;
       const slide = context.presentation.slides.getItem(slideId);
       const shape = slide.shapes.getItem(shapeId);
       shape.delete();
@@ -1132,7 +1163,7 @@ async function insertLogoNow(logo) {
       : null;
     if (target) {
       await insertSvg(svg, target);
-      await deleteShapeById(target.shapeId);
+      await deleteShapeById(target.shapeId, target.slideId);
     } else {
       const fallbackPosition = await getNextInsertPosition();
       await insertSvg(svg, fallbackPosition);
@@ -1650,8 +1681,21 @@ function buildZipMeta(record, count) {
 function updateZipMeta(meta) {
   if (!zipMeta) return;
   if (!meta) {
+    setZipSummaryVisible(false);
+    setZipPanelExpanded(true);
+    zipPanelToggled = false;
+    if (zipStatusText) {
+      zipStatusText.textContent = "Aucun ZIP chargé";
+    }
     zipMeta.textContent = "Aucun ZIP local chargé.";
     return;
+  }
+  setZipSummaryVisible(true);
+  if (zipStatusText) {
+    zipStatusText.textContent = "ZIP chargé";
+  }
+  if (!zipPanelToggled && zipPanelExpanded) {
+    setZipPanelExpanded(false);
   }
   const details = [];
   if (meta.name) {
