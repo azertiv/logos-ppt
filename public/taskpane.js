@@ -18,12 +18,14 @@ const replaceToggle = document.getElementById("replace-toggle");
 
 let allLogos = [];
 let keywordsMap = new Map();
+let wordnetMap = new Map();
 let keywordFilterState = "all";
 let sortMode = "az";
 let replaceSelectionEnabled = false;
 let localLogosCache = null;
 let localZipRecord = null;
 let keywordsPromise = null;
+let wordnetPromise = null;
 let logoById = new Map();
 let tokenIndex = new Map();
 let searchCache = new Map();
@@ -58,6 +60,10 @@ const DB_STORE = "assets";
 const TRANSPARENT_PIXEL =
   "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
 const MIN_SEARCH_PREFIX = 3;
+const WORDNET_SYNONYMS_URL = "wordnet-synonyms.json";
+const SYNONYM_LIMIT = 10;
+const SCORE_DIRECT = 100;
+const SCORE_SYNONYM = 12;
 const SEARCH_DEBOUNCE_MS = 140;
 const SEARCH_CACHE_LIMIT = 50;
 const RENDER_BATCH_SIZE = 72;
@@ -396,6 +402,7 @@ async function loadLogos(options = {}) {
   const { force = false } = options;
   if (force) {
     keywordsPromise = null;
+    wordnetPromise = null;
   }
   await loadLocalLogos({ force });
 }
@@ -425,6 +432,7 @@ async function loadLocalLogos(options = {}) {
     }
     const map = await getKeywordsMap();
     keywordsMap = map;
+    wordnetMap = await getWordnetMap();
     allLogos = attachKeywords(localLogosCache, keywordsMap);
     buildSearchIndex(allLogos);
     requestRender();
@@ -479,6 +487,110 @@ async function handleZipFile(file) {
   }
 }
 
+function normalizeSynonymList(list) {
+  const seen = new Set();
+  const output = [];
+  for (const item of list) {
+    const normalized = normalizeSearchText(item);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    output.push(normalized);
+  }
+  return output;
+}
+
+function depluralizeToken(token) {
+  if (!token || token.length < 4) return token;
+  if (token.endsWith("ies") && token.length > 4) {
+    return `${token.slice(0, -3)}y`;
+  }
+  if (token.endsWith("es") && token.length > 3) {
+    return token.slice(0, -2);
+  }
+  if (token.endsWith("s") && token.length > 3) {
+    return token.slice(0, -1);
+  }
+  return token;
+}
+
+function getSynonymsForToken(token) {
+  if (!token || !wordnetMap || wordnetMap.size === 0) return [];
+  const direct = wordnetMap.get(token);
+  if (direct && direct.length) return direct;
+  const singular = depluralizeToken(token);
+  if (singular && singular !== token) {
+    const fallback = wordnetMap.get(singular);
+    if (fallback && fallback.length) return fallback;
+  }
+  return [];
+}
+
+function buildQueryGroups(tokens) {
+  return tokens.map((token) => {
+    const synonyms = getSynonymsForToken(token)
+      .filter((item) => item && item !== token)
+      .slice(0, SYNONYM_LIMIT);
+    const terms = [token, ...synonyms].filter(Boolean);
+    const termTokens = terms.map((term) => tokenizeSearchText(term));
+    return { token, synonyms, terms, termTokens };
+  });
+}
+
+function buildCandidateSetForGroup(group) {
+  const union = new Set();
+  for (const tokens of group.termTokens) {
+    for (const term of tokens) {
+      const set = tokenIndex.get(term);
+      if (!set) continue;
+      for (const id of set) {
+        union.add(id);
+      }
+    }
+  }
+  return union;
+}
+
+function matchesGroup(searchText, group) {
+  if (!searchText) return false;
+  return group.terms.some((term) => searchText.includes(term));
+}
+
+function scoreLogo(logo, queryTokens, groups) {
+  const text = logo.searchText || "";
+  let directMatches = 0;
+  let synonymMatches = 0;
+  const matchedSynonyms = new Set();
+  for (const token of queryTokens) {
+    if (text.includes(token)) {
+      directMatches += 1;
+    }
+  }
+  for (const group of groups) {
+    for (const synonym of group.synonyms) {
+      if (matchedSynonyms.has(synonym)) continue;
+      if (text.includes(synonym)) {
+        synonymMatches += 1;
+        matchedSynonyms.add(synonym);
+      }
+    }
+  }
+  return directMatches * SCORE_DIRECT + synonymMatches * SCORE_SYNONYM;
+}
+
+function compareBySortMode(a, b) {
+  if (sortMode === "recent") {
+    const delta = (b.lastUsedAt || 0) - (a.lastUsedAt || 0);
+    if (delta !== 0) return delta;
+    return a.name.localeCompare(b.name);
+  }
+  if (sortMode === "favorites") {
+    const favDelta = (b.isFavorite ? 1 : 0) - (a.isFavorite ? 1 : 0);
+    if (favDelta !== 0) return favDelta;
+    return a.name.localeCompare(b.name);
+  }
+  return a.name.localeCompare(b.name);
+}
+
 function filterLogos() {
   const query = normalizeSearchText(searchInput.value.trim());
   const cacheKey = `${keywordFilterState}|${sortMode}|${query}`;
@@ -486,12 +598,13 @@ function filterLogos() {
   if (cached) return cached;
 
   let candidates = allLogos;
+  const queryTokens = query ? tokenizeSearchText(query) : [];
+  const groups = queryTokens.length ? buildQueryGroups(queryTokens) : [];
 
   if (query) {
-    const tokens = tokenizeSearchText(query);
-    if (tokens.length) {
-      const sets = tokens.map((token) => tokenIndex.get(token)).filter(Boolean);
-      if (sets.length !== tokens.length) {
+    if (queryTokens.length) {
+      const sets = groups.map((group) => buildCandidateSetForGroup(group));
+      if (sets.some((set) => set.size === 0)) {
         const empty = [];
         cacheSearchResult(cacheKey, empty);
         return empty;
@@ -504,10 +617,8 @@ function filterLogos() {
           candidates.push(logo);
         }
       }
-    }
-    if (tokens.length) {
       candidates = candidates.filter((logo) =>
-        tokens.every((token) => (logo.searchText || "").includes(token))
+        groups.every((group) => matchesGroup(logo.searchText || "", group))
       );
     } else {
       candidates = candidates.filter((logo) => (logo.searchText || "").includes(query));
@@ -520,7 +631,23 @@ function filterLogos() {
     return true;
   });
 
-  const sorted = sortLogos(filtered);
+  let sorted = [];
+  if (queryTokens.length) {
+    sorted = filtered.slice();
+    for (const logo of sorted) {
+      logo.relevanceScore = scoreLogo(logo, queryTokens, groups);
+    }
+    sorted.sort((a, b) => {
+      const delta = (b.relevanceScore || 0) - (a.relevanceScore || 0);
+      if (delta !== 0) return delta;
+      return compareBySortMode(a, b);
+    });
+  } else {
+    sorted = sortLogos(filtered);
+    for (const logo of sorted) {
+      logo.relevanceScore = 0;
+    }
+  }
   cacheSearchResult(cacheKey, sorted);
   return sorted;
 }
@@ -574,6 +701,8 @@ function buildSearchIndex(logos) {
     logoById.set(id, logo);
     const tokens = tokenizeSearchText(logo.searchText || "");
     const uniqueTokens = new Set(tokens);
+    logo.searchTokens = tokens;
+    logo.searchTokenSet = new Set(tokens);
     for (const token of uniqueTokens) {
       indexToken(token, id);
     }
@@ -681,6 +810,11 @@ function renderLogos(logos) {
   grid.replaceChildren();
   updateLogoCount(logos.length);
 
+  const maxScore = logos.reduce(
+    (max, logo) => Math.max(max, logo.relevanceScore || 0),
+    0
+  );
+
   let index = 0;
   const total = logos.length;
 
@@ -689,7 +823,7 @@ function renderLogos(logos) {
     const fragment = document.createDocumentFragment();
     const end = Math.min(index + RENDER_BATCH_SIZE, total);
     for (; index < end; index += 1) {
-      fragment.appendChild(createLogoCard(logos[index], index));
+      fragment.appendChild(createLogoCard(logos[index], index, maxScore));
     }
     grid.appendChild(fragment);
     if (index < total) {
@@ -700,7 +834,7 @@ function renderLogos(logos) {
   renderChunk();
 }
 
-function createLogoCard(logo, index) {
+function createLogoCard(logo, index, maxScore) {
   const card = document.createElement("div");
   card.className = "logo-card";
   if (logo.isFavorite) {
@@ -711,6 +845,13 @@ function createLogoCard(logo, index) {
   card.setAttribute("aria-label", `Insérer ${logo.name}`);
   card.style.animationDelay = `${index * 20}ms`;
   card.dataset.logoId = String(logo.id ?? index);
+  const score = Number(logo.relevanceScore) || 0;
+  const normalized = maxScore > 0 ? Math.min(1, score / maxScore) : 0;
+  const baseAlpha = maxScore > 0 ? 0.08 : 0.04;
+  const alpha = baseAlpha + normalized * 0.45;
+  const alphaStrong = baseAlpha + normalized * 0.7;
+  card.style.setProperty("--relevance-alpha", alpha.toFixed(3));
+  card.style.setProperty("--relevance-alpha-strong", alphaStrong.toFixed(3));
 
   const favButton = document.createElement("button");
   favButton.type = "button";
@@ -1122,6 +1263,13 @@ function getKeywordsMap() {
   return keywordsPromise;
 }
 
+function getWordnetMap() {
+  if (!wordnetPromise) {
+    wordnetPromise = fetchWordnetSynonyms();
+  }
+  return wordnetPromise;
+}
+
 async function fetchKeywords() {
   try {
     const response = await fetch("keywords.json", { cache: "force-cache" });
@@ -1134,6 +1282,38 @@ async function fetchKeywords() {
     for (const item of items) {
       if (item?.file) {
         map.set(item.file, Array.isArray(item.keywords) ? item.keywords : []);
+      }
+    }
+    return map;
+  } catch (error) {
+    return new Map();
+  }
+}
+
+async function fetchWordnetSynonyms() {
+  try {
+    const response = await fetch(WORDNET_SYNONYMS_URL, { cache: "force-cache" });
+    if (!response.ok) {
+      return new Map();
+    }
+    const data = await response.json();
+    const items = data?.items || data?.synonyms || {};
+    const map = new Map();
+    if (Array.isArray(items)) {
+      for (const item of items) {
+        if (!item) continue;
+        const term = normalizeSearchText(item.term || item.word || "");
+        const synonyms = Array.isArray(item.synonyms) ? item.synonyms : [];
+        if (term && synonyms.length) {
+          map.set(term, normalizeSynonymList(synonyms));
+        }
+      }
+    } else if (items && typeof items === "object") {
+      for (const [term, synonyms] of Object.entries(items)) {
+        if (!Array.isArray(synonyms) || !synonyms.length) continue;
+        const normalized = normalizeSearchText(term);
+        if (!normalized) continue;
+        map.set(normalized, normalizeSynonymList(synonyms));
       }
     }
     return map;
