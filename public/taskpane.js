@@ -1047,7 +1047,7 @@ async function getPreparedSvg(logo) {
   return normalized;
 }
 
-async function getReplaceSelectionPosition() {
+async function getReplaceSelectionTarget() {
   if (!replaceSelectionEnabled) return null;
   if (typeof PowerPoint === "undefined" || typeof PowerPoint.run !== "function") {
     return null;
@@ -1065,9 +1065,10 @@ async function getReplaceSelectionPosition() {
         return;
       }
       const shape = shapes.items[0];
-      shape.load(["left", "top", "width", "height"]);
+      shape.load(["id", "left", "top", "width", "height"]);
       await context.sync();
       info = {
+        shapeId: shape.id,
         imageLeft: shape.left,
         imageTop: shape.top,
         imageWidth: shape.width,
@@ -1079,6 +1080,25 @@ async function getReplaceSelectionPosition() {
     return null;
   }
   return info;
+}
+
+async function deleteShapeById(shapeId) {
+  if (!shapeId) return;
+  if (typeof PowerPoint === "undefined" || typeof PowerPoint.run !== "function") {
+    return;
+  }
+  try {
+    await PowerPoint.run(async (context) => {
+      const slideId = await getSelectedSlideId();
+      if (!slideId) return;
+      const slide = context.presentation.slides.getItem(slideId);
+      const shape = slide.shapes.getItem(shapeId);
+      shape.delete();
+      await context.sync();
+    });
+  } catch (error) {
+    console.warn("Impossible de supprimer la forme sélectionnée.", error);
+  }
 }
 
 function insertLogo(logo) {
@@ -1107,11 +1127,12 @@ async function insertLogoNow(logo) {
 
   try {
     const svg = await getPreparedSvg(logo);
-    const position = replaceSelectionEnabled
-      ? await getReplaceSelectionPosition()
+    const target = replaceSelectionEnabled
+      ? await getReplaceSelectionTarget()
       : null;
-    if (position) {
-      await insertSvg(svg, position);
+    if (target) {
+      await insertSvg(svg, target);
+      await deleteShapeById(target.shapeId);
     } else {
       const fallbackPosition = await getNextInsertPosition();
       await insertSvg(svg, fallbackPosition);
