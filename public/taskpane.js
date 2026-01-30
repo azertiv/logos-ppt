@@ -814,6 +814,7 @@ function renderLogos(logos) {
     (max, logo) => Math.max(max, logo.relevanceScore || 0),
     0
   );
+  const queryActive = normalizeSearchText(searchInput.value.trim()).length > 0;
 
   let index = 0;
   const total = logos.length;
@@ -823,7 +824,7 @@ function renderLogos(logos) {
     const fragment = document.createDocumentFragment();
     const end = Math.min(index + RENDER_BATCH_SIZE, total);
     for (; index < end; index += 1) {
-      fragment.appendChild(createLogoCard(logos[index], index, maxScore));
+      fragment.appendChild(createLogoCard(logos[index], index, maxScore, queryActive));
     }
     grid.appendChild(fragment);
     if (index < total) {
@@ -834,7 +835,7 @@ function renderLogos(logos) {
   renderChunk();
 }
 
-function createLogoCard(logo, index, maxScore) {
+function createLogoCard(logo, index, maxScore, queryActive) {
   const card = document.createElement("div");
   card.className = "logo-card";
   if (logo.isFavorite) {
@@ -852,6 +853,13 @@ function createLogoCard(logo, index, maxScore) {
   const alphaStrong = baseAlpha + normalized * 0.7;
   card.style.setProperty("--relevance-alpha", alpha.toFixed(3));
   card.style.setProperty("--relevance-alpha-strong", alphaStrong.toFixed(3));
+
+  if (queryActive) {
+    const scoreBadge = document.createElement("div");
+    scoreBadge.className = "score-badge";
+    scoreBadge.textContent = String(Math.round(score));
+    card.appendChild(scoreBadge);
+  }
 
   const favButton = document.createElement("button");
   favButton.type = "button";

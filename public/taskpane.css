@@ -306,6 +306,22 @@ button:hover {
   contain: layout paint;
 }
 
+.score-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.3px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #6a4bd8;
+  border: 1px solid rgba(132, 84, 255, 0.25);
+  box-shadow: 0 4px 10px rgba(40, 24, 90, 0.12);
+  pointer-events: none;
+}
+
 .favorite-toggle {
   position: absolute;
   top: 8px;
