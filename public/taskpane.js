@@ -880,9 +880,10 @@ function createLogoCard(logo, index, maxScore) {
   card.dataset.logoId = String(logo.id ?? index);
   const score = Number(logo.relevanceScore) || 0;
   const normalized = maxScore > 0 ? Math.min(1, score / maxScore) : 0;
-  const baseAlpha = maxScore > 0 ? 0.12 : 0.05;
-  const alpha = baseAlpha + normalized * 0.38;
-  const alphaStrong = baseAlpha + normalized * 0.58;
+  const weighted = Math.pow(normalized, 1.5);
+  const baseAlpha = maxScore > 0 ? 0.06 : 0.05;
+  const alpha = baseAlpha + weighted * 0.5;
+  const alphaStrong = baseAlpha + weighted * 0.7;
   card.style.setProperty("--relevance-alpha", alpha.toFixed(3));
   card.style.setProperty("--relevance-alpha-strong", alphaStrong.toFixed(3));
 
@@ -1096,16 +1097,23 @@ async function getReplaceSelectionTarget() {
         return;
       }
       const shape = shapes.items[0];
-      shape.load(["id", "left", "top", "width", "height"]);
+      shape.load(["id", "left", "top", "width", "height", "type"]);
+      shape.fill.load(["type", "foregroundColor"]);
       slide.load("id");
       await context.sync();
+      const fillType = shape.fill?.type;
+      const fillColor =
+        fillType && String(fillType).toLowerCase() === "solid"
+          ? shape.fill.foregroundColor
+          : null;
       info = {
         shapeId: shape.id,
         slideId: slide.id,
         imageLeft: shape.left,
         imageTop: shape.top,
         imageWidth: shape.width,
-        imageHeight: shape.height
+        imageHeight: shape.height,
+        fillColor
       };
     });
   } catch (error) {
@@ -1115,13 +1123,30 @@ async function getReplaceSelectionTarget() {
   return info;
 }
 
-async function deleteShapeById(shapeId, slideId) {
+async function deleteShapeById(shapeId, slideId, fillColor) {
   if (!shapeId || !slideId) return;
   if (typeof PowerPoint === "undefined" || typeof PowerPoint.run !== "function") {
     return;
   }
   try {
     await PowerPoint.run(async (context) => {
+      if (fillColor) {
+        const selection = context.presentation.getSelectedShapes();
+        selection.load("items/type,items/fill/type");
+        await context.sync();
+        const newShape = selection.items && selection.items[0];
+        if (newShape) {
+          const fillType = newShape.fill?.type;
+          const isPictureFill =
+            fillType && String(fillType).toLowerCase().includes("picture");
+          const isGeometric =
+            newShape.type &&
+            String(newShape.type).toLowerCase().includes("geometric");
+          if (!isPictureFill && isGeometric) {
+            newShape.fill.setSolidColor(fillColor);
+          }
+        }
+      }
       const slide = context.presentation.slides.getItem(slideId);
       const shape = slide.shapes.getItem(shapeId);
       shape.delete();
@@ -1163,7 +1188,7 @@ async function insertLogoNow(logo) {
       : null;
     if (target) {
       await insertSvg(svg, target);
-      await deleteShapeById(target.shapeId, target.slideId);
+      await deleteShapeById(target.shapeId, target.slideId, target.fillColor);
     } else {
       const fallbackPosition = await getNextInsertPosition();
       await insertSvg(svg, fallbackPosition);
