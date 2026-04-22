@@ -26,6 +26,14 @@ const aiApiKeyInput = document.getElementById("ai-api-key-input");
 const aiApiSave = document.getElementById("ai-api-save");
 const aiApiClear = document.getElementById("ai-api-clear");
 const aiSettingsStatus = document.getElementById("ai-settings-status");
+const aiUsageCalls = document.getElementById("ai-usage-calls");
+const aiUsageInput = document.getElementById("ai-usage-input");
+const aiUsageCached = document.getElementById("ai-usage-cached");
+const aiUsageOutput = document.getElementById("ai-usage-output");
+const aiUsageLastCost = document.getElementById("ai-usage-last-cost");
+const aiUsageTotalCost = document.getElementById("ai-usage-total-cost");
+const aiPricingNote = document.getElementById("ai-pricing-note");
+const aiUsageReset = document.getElementById("ai-usage-reset");
 
 let allLogos = [];
 let keywordsMap = new Map();
@@ -70,6 +78,14 @@ let aiSearchState = {
 };
 let aiSearchCache = new Map();
 let scrollFrame = null;
+let aiUsageSummary = {
+  callCount: 0,
+  inputTokens: 0,
+  cachedInputTokens: 0,
+  outputTokens: 0,
+  totalCostUsd: 0,
+  lastCostUsd: 0
+};
 
 const STORAGE_KEYS = {
   density: "logosPptDensity",
@@ -81,7 +97,8 @@ const STORAGE_KEYS = {
   aiEnabled: "logosPptAiEnabled",
   aiApiKey: "logosPptAiApiKey",
   aiSearchCache: "logosPptAiSearchCache",
-  aiAnonId: "logosPptAiAnonId"
+  aiAnonId: "logosPptAiAnonId",
+  aiUsage: "logosPptAiUsage"
 };
 const ZIP_CACHE_KEY = "logosPptZipCache";
 const DB_NAME = "logosPptCache";
@@ -112,6 +129,12 @@ const AI_SCAN_FALLBACK_LIMIT = 320;
 const AI_CANDIDATE_LIMIT = 72;
 const AI_RESULT_LIMIT = 24;
 const AI_CACHE_LIMIT = 24;
+const AI_KEY_WARNING_MESSAGE = "Ajoutez une clé API OpenAI dans Réglages pour activer le mode AI.";
+const AI_PRICING_PER_MILLION = {
+  input: 0.2,
+  cachedInput: 0.02,
+  output: 1.25
+};
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.PowerPoint) {
@@ -132,12 +155,14 @@ async function init() {
     updateSearchClear();
     scheduleSearch();
   });
-  searchClear.addEventListener("click", () => {
-    searchInput.value = "";
-    updateSearchClear();
-    scheduleSearch({ immediate: true });
-    searchInput.focus();
-  });
+  if (searchClear) {
+    searchClear.addEventListener("click", () => {
+      searchInput.value = "";
+      updateSearchClear();
+      scheduleSearch({ immediate: true });
+      searchInput.focus();
+    });
+  }
   if (keywordToggle) {
     keywordToggle.addEventListener("click", () => {
       keywordFilterState =
@@ -189,6 +214,7 @@ async function init() {
   updateSearchClear();
   syncAiToggle();
   syncAiSettingsStatus();
+  syncAiUsageView();
   syncScrollState();
   await hydrateLocalCacheMeta();
   await loadLogos();
@@ -230,6 +256,8 @@ function restorePreferences() {
     aiApiKeyInput.value = aiApiKey;
   }
   loadAiCacheFromStorage();
+  loadAiUsageFromStorage();
+  clearAiStatusWarningIfConfigured();
 }
 
 function persistKeywordFilter() {
@@ -334,6 +362,7 @@ function initAiControls() {
       aiApiKey = nextValue;
       persistAiApiKey();
       syncAiSettingsStatus(aiApiKey ? "Clé API enregistrée localement." : "Clé supprimée.");
+      clearAiStatusWarningIfConfigured();
       syncAiToggle();
       scheduleSearch({ immediate: true });
     });
@@ -351,6 +380,20 @@ function initAiControls() {
       requestRender();
     });
   }
+  if (aiUsageReset) {
+    aiUsageReset.addEventListener("click", () => {
+      aiUsageSummary = {
+        callCount: 0,
+        inputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        totalCostUsd: 0,
+        lastCostUsd: 0
+      };
+      persistAiUsageSummary();
+      syncAiUsageView();
+    });
+  }
 }
 
 function handleAiToggle() {
@@ -359,9 +402,9 @@ function handleAiToggle() {
     aiEnabled = false;
     persistAiEnabled();
     syncAiToggle();
-    syncAiSettingsStatus("Ajoutez une clé API OpenAI avant d'activer le mode IA.");
+    syncAiSettingsStatus("Ajoutez une clé API OpenAI avant d'activer le mode AI.");
     setSettingsPanelOpen(true);
-    setStatus("Ajoutez une clé API OpenAI dans Réglages pour activer le mode IA.", "error");
+    setStatus(AI_KEY_WARNING_MESSAGE, "error");
     return;
   }
   aiEnabled = nextState;
@@ -369,6 +412,7 @@ function handleAiToggle() {
   if (!aiEnabled) {
     clearAiSearchState();
   }
+  clearAiStatusWarningIfConfigured();
   syncAiToggle();
   syncAiSettingsStatus();
   scheduleSearch({ immediate: true });
@@ -382,9 +426,9 @@ function syncAiToggle() {
   aiToggle.setAttribute("aria-pressed", aiEnabled ? "true" : "false");
   aiToggle.setAttribute(
     "aria-label",
-    aiEnabled ? "Désactiver le mode IA" : "Activer le mode IA"
+    aiEnabled ? "Désactiver le mode AI" : "Activer le mode AI"
   );
-  aiToggle.title = aiEnabled ? "Mode IA activé" : "Mode IA désactivé";
+  aiToggle.title = aiEnabled ? "Mode AI activé" : "Mode AI désactivé";
 }
 
 function syncAiSettingsStatus(message = "") {
@@ -394,14 +438,14 @@ function syncAiSettingsStatus(message = "") {
     return;
   }
   if (!aiApiKey) {
-    aiSettingsStatus.textContent = "Clé absente. Le mode IA restera désactivé.";
+    aiSettingsStatus.textContent = "Clé absente. Le mode AI restera désactivé.";
     return;
   }
   if (aiEnabled) {
-    aiSettingsStatus.textContent = `Mode IA prêt sur ${AI_MODEL}. La clé est stockée localement dans ce navigateur.`;
+    aiSettingsStatus.textContent = `Mode AI prêt sur ${AI_MODEL}. La clé est stockée localement dans ce navigateur.`;
     return;
   }
-  aiSettingsStatus.textContent = `Clé disponible. Activez le bouton IA dans la barre de recherche pour utiliser ${AI_MODEL}.`;
+  aiSettingsStatus.textContent = `Clé disponible. Activez le bouton AI dans la barre de recherche pour utiliser ${AI_MODEL}.`;
 }
 
 function scheduleScrollSync() {
@@ -479,6 +523,83 @@ function saveAiCacheEntry(key, value) {
     aiSearchCache.delete(oldestKey);
   }
   persistAiSearchCache();
+}
+
+function loadAiUsageFromStorage() {
+  const raw = safeStorageGet(STORAGE_KEYS.aiUsage);
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== "object") return;
+    aiUsageSummary = {
+      callCount: Number(data.callCount) || 0,
+      inputTokens: Number(data.inputTokens) || 0,
+      cachedInputTokens: Number(data.cachedInputTokens) || 0,
+      outputTokens: Number(data.outputTokens) || 0,
+      totalCostUsd: Number(data.totalCostUsd) || 0,
+      lastCostUsd: Number(data.lastCostUsd) || 0
+    };
+  } catch (error) {
+    // Ignore invalid persisted usage.
+  }
+}
+
+function persistAiUsageSummary() {
+  safeStorageSet(STORAGE_KEYS.aiUsage, JSON.stringify(aiUsageSummary));
+}
+
+function syncAiUsageView() {
+  if (aiUsageCalls) aiUsageCalls.textContent = formatInteger(aiUsageSummary.callCount);
+  if (aiUsageInput) aiUsageInput.textContent = formatInteger(aiUsageSummary.inputTokens);
+  if (aiUsageCached) aiUsageCached.textContent = formatInteger(aiUsageSummary.cachedInputTokens);
+  if (aiUsageOutput) aiUsageOutput.textContent = formatInteger(aiUsageSummary.outputTokens);
+  if (aiUsageLastCost) aiUsageLastCost.textContent = formatUsd(aiUsageSummary.lastCostUsd);
+  if (aiUsageTotalCost) aiUsageTotalCost.textContent = formatUsd(aiUsageSummary.totalCostUsd);
+  if (aiPricingNote) {
+    aiPricingNote.textContent =
+      `Estimation ${AI_MODEL}: input $${AI_PRICING_PER_MILLION.input.toFixed(2)}/M, cached input ` +
+      `$${AI_PRICING_PER_MILLION.cachedInput.toFixed(2)}/M, output $${AI_PRICING_PER_MILLION.output.toFixed(2)}/M.`;
+  }
+}
+
+function recordAiUsage(usage) {
+  if (!usage) return;
+  const promptTokens = Number(usage.prompt_tokens) || 0;
+  const cachedInputTokens = Number(usage.prompt_tokens_details?.cached_tokens) || 0;
+  const outputTokens = Number(usage.completion_tokens) || 0;
+  const billableInputTokens = Math.max(0, promptTokens - cachedInputTokens);
+  const costUsd =
+    (billableInputTokens * AI_PRICING_PER_MILLION.input) / 1_000_000 +
+    (cachedInputTokens * AI_PRICING_PER_MILLION.cachedInput) / 1_000_000 +
+    (outputTokens * AI_PRICING_PER_MILLION.output) / 1_000_000;
+
+  aiUsageSummary.callCount += 1;
+  aiUsageSummary.inputTokens += promptTokens;
+  aiUsageSummary.cachedInputTokens += cachedInputTokens;
+  aiUsageSummary.outputTokens += outputTokens;
+  aiUsageSummary.lastCostUsd = costUsd;
+  aiUsageSummary.totalCostUsd += costUsd;
+  persistAiUsageSummary();
+  syncAiUsageView();
+}
+
+function clearAiStatusWarningIfConfigured() {
+  if (!aiApiKey || !statusEl) return;
+  if (statusEl.textContent === AI_KEY_WARNING_MESSAGE) {
+    setStatus("");
+  }
+}
+
+function formatInteger(value) {
+  return new Intl.NumberFormat("fr-FR").format(Number(value) || 0);
+}
+
+function formatUsd(value) {
+  const amount = Number(value) || 0;
+  if (amount >= 1) {
+    return `$${amount.toFixed(2)}`;
+  }
+  return `$${amount.toFixed(6)}`;
 }
 
 function isValidSortMode(value) {
@@ -1079,8 +1200,8 @@ async function requestAiSearch(query) {
     saveAiCacheEntry(cacheKey, { resultIds, source: "ai" });
     syncAiSettingsStatus(
       resultIds.length
-        ? `Mode IA actif sur ${AI_MODEL}. ${resultIds.length} résultat${resultIds.length > 1 ? "s" : ""} reranké${resultIds.length > 1 ? "s" : ""}.`
-        : `Mode IA actif sur ${AI_MODEL}, sans résultat exploitable pour cette requête.`
+        ? `Mode AI actif sur ${AI_MODEL}. ${resultIds.length} résultat${resultIds.length > 1 ? "s" : ""} reranké${resultIds.length > 1 ? "s" : ""}.`
+        : `Mode AI actif sur ${AI_MODEL}, sans résultat exploitable pour cette requête.`
     );
     syncAiToggle();
     requestRender();
@@ -1097,7 +1218,7 @@ async function requestAiSearch(query) {
       source: "error"
     };
     syncAiSettingsStatus(
-      `Erreur IA : ${aiSearchState.error}. La recherche locale reste disponible.`
+      `Erreur AI : ${aiSearchState.error}. La recherche locale reste disponible.`
     );
     syncAiToggle();
     requestRender();
@@ -1147,7 +1268,7 @@ async function expandQueryWithAi(query) {
       }
     }
   };
-  const payload = await callOpenAiJson({
+  const { parsed } = await callOpenAiJson({
     schemaName: "pictogram_query_expansion",
     schema,
     systemPrompt:
@@ -1155,10 +1276,10 @@ async function expandQueryWithAi(query) {
     userPrompt: `Query: ${query}`
   });
   return {
-    coreConcepts: normalizeAiTerms(payload.core_concepts),
-    visualMetaphors: normalizeAiTerms(payload.visual_metaphors),
-    concreteObjects: normalizeAiTerms(payload.concrete_objects),
-    relatedKeywords: normalizeAiTerms(payload.related_keywords)
+    coreConcepts: normalizeAiTerms(parsed.core_concepts),
+    visualMetaphors: normalizeAiTerms(parsed.visual_metaphors),
+    concreteObjects: normalizeAiTerms(parsed.concrete_objects),
+    relatedKeywords: normalizeAiTerms(parsed.related_keywords)
   };
 }
 
@@ -1250,7 +1371,7 @@ async function rankAiCandidates(query, expansion, candidates) {
     return `${logo.id} | ${label}${keywords ? ` | ${keywords}` : ""}`;
   });
 
-  const payload = await callOpenAiJson({
+  const { parsed } = await callOpenAiJson({
     schemaName: "pictogram_candidate_ranking",
     schema,
     systemPrompt:
@@ -1267,8 +1388,8 @@ async function rankAiCandidates(query, expansion, candidates) {
   });
 
   return {
-    orderedIds: Array.isArray(payload.ordered_ids) ? payload.ordered_ids : [],
-    note: payload.note || ""
+    orderedIds: Array.isArray(parsed.ordered_ids) ? parsed.ordered_ids : [],
+    note: parsed.note || ""
   };
 }
 
@@ -1310,7 +1431,12 @@ async function callOpenAiJson(options) {
   if (!content) {
     throw new Error("Réponse IA vide.");
   }
-  return JSON.parse(content);
+  const parsed = JSON.parse(content);
+  recordAiUsage(data?.usage);
+  return {
+    parsed,
+    usage: data?.usage || null
+  };
 }
 
 function normalizeAiTerms(list) {

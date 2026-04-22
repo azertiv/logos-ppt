@@ -22,7 +22,6 @@
             <span class="brand-dot"></span>
             <div>
               <h1>Neurow.Pictos</h1>
-              <p>Insérez les logos officiels dans vos slides.</p>
             </div>
           </div>
           <button
@@ -128,6 +127,36 @@
               <div id="ai-settings-status" class="settings-meta">
                 Clé absente. Le mode IA restera désactivé.
               </div>
+              <div class="usage-grid">
+                <div class="usage-item">
+                  <span>Appels</span>
+                  <strong id="ai-usage-calls">0</strong>
+                </div>
+                <div class="usage-item">
+                  <span>Input</span>
+                  <strong id="ai-usage-input">0</strong>
+                </div>
+                <div class="usage-item">
+                  <span>Cached</span>
+                  <strong id="ai-usage-cached">0</strong>
+                </div>
+                <div class="usage-item">
+                  <span>Output</span>
+                  <strong id="ai-usage-output">0</strong>
+                </div>
+                <div class="usage-item">
+                  <span>Dernier coût</span>
+                  <strong id="ai-usage-last-cost">$0.000000</strong>
+                </div>
+                <div class="usage-item">
+                  <span>Coût cumulé</span>
+                  <strong id="ai-usage-total-cost">$0.000000</strong>
+                </div>
+              </div>
+              <div id="ai-pricing-note" class="settings-meta">
+                Estimation gpt-5.4-nano: input $0.20/M, cached input $0.02/M, output $1.25/M.
+              </div>
+              <button id="ai-usage-reset" class="ghost" type="button">Réinitialiser le suivi</button>
             </section>
           </div>
         </aside>
@@ -143,11 +172,8 @@
           <label class="search search-floating" aria-label="Recherche">
             <div class="search-field">
               <input id="search-input" type="search" placeholder="Tapez un mot-clé ou un concept…" />
-              <button id="ai-toggle" class="ai-toggle" type="button" aria-label="Activer le mode IA" aria-pressed="false">
-                IA
-              </button>
-              <button id="search-clear" class="search-clear hidden" type="button" aria-label="Effacer la recherche">
-                ×
+              <button id="ai-toggle" class="ai-toggle" type="button" aria-label="Activer le mode AI" aria-pressed="false">
+                AI
               </button>
             </div>
           </label>
