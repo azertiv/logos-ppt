@@ -72,7 +72,7 @@ if (tasks.length) {
 
 await runPool(tasks, concurrency, async ({ file, index }) => {
   const svgPath = path.join(logosDir, file);
-  const pngPath = path.join(tmpDir, file.replace(/\\.svg$/i, ".png"));
+  const pngPath = path.join(tmpDir, file.replace(/\.svg$/i, ".png"));
 
   try {
     execFileSync("rsvg-convert", [

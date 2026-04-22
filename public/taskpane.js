@@ -6,6 +6,8 @@ const searchInput = document.getElementById("search-input");
 const searchClear = document.getElementById("search-clear");
 const refreshBtn = document.getElementById("refresh-btn");
 const logoCount = document.getElementById("logo-count");
+const settingsButton = document.getElementById("settings-button");
+const settingsPanel = document.getElementById("settings-panel");
 const keywordToggle = document.getElementById("keyword-toggle");
 const densityRange = document.getElementById("density-range");
 const densityValue = document.getElementById("density-value");
@@ -19,6 +21,11 @@ const zipInput = document.getElementById("zip-input");
 const zipButton = document.getElementById("zip-button");
 const zipMeta = document.getElementById("zip-meta");
 const replaceToggle = document.getElementById("replace-toggle");
+const aiToggle = document.getElementById("ai-toggle");
+const aiApiKeyInput = document.getElementById("ai-api-key-input");
+const aiApiSave = document.getElementById("ai-api-save");
+const aiApiClear = document.getElementById("ai-api-clear");
+const aiSettingsStatus = document.getElementById("ai-settings-status");
 
 let allLogos = [];
 let keywordsMap = new Map();
@@ -26,6 +33,9 @@ let wordnetMap = new Map();
 let keywordFilterState = "all";
 let sortMode = "az";
 let replaceSelectionEnabled = false;
+let settingsPanelOpen = false;
+let aiEnabled = false;
+let aiApiKey = "";
 let localLogosCache = null;
 let localZipRecord = null;
 let keywordsPromise = null;
@@ -50,6 +60,16 @@ const insertStateBySlide = new Map();
 const localObjectUrls = new Set();
 const favoriteSet = new Set();
 const recentMap = new Map();
+let aiSearchState = {
+  query: "",
+  resultIds: [],
+  loading: false,
+  error: "",
+  requestId: 0,
+  source: "local"
+};
+let aiSearchCache = new Map();
+let scrollFrame = null;
 
 const STORAGE_KEYS = {
   density: "logosPptDensity",
@@ -57,7 +77,11 @@ const STORAGE_KEYS = {
   sortMode: "logosPptSortMode",
   favorites: "logosPptFavorites",
   recents: "logosPptRecents",
-  replaceSelection: "logosPptReplaceSelection"
+  replaceSelection: "logosPptReplaceSelection",
+  aiEnabled: "logosPptAiEnabled",
+  aiApiKey: "logosPptAiApiKey",
+  aiSearchCache: "logosPptAiSearchCache",
+  aiAnonId: "logosPptAiAnonId"
 };
 const ZIP_CACHE_KEY = "logosPptZipCache";
 const DB_NAME = "logosPptCache";
@@ -80,6 +104,14 @@ const INSERT_OFFSET_STEP = { x: 18, y: 18 };
 const INSERT_OFFSET_STEPS = 8;
 const INSERT_RESET_MS = 60000;
 const RECENT_LIMIT = 80;
+const AI_MODEL = "gpt-5.4-nano";
+const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
+const AI_SEARCH_DEBOUNCE_MS = 520;
+const AI_FULL_SCAN_LIMIT = 180;
+const AI_SCAN_FALLBACK_LIMIT = 320;
+const AI_CANDIDATE_LIMIT = 72;
+const AI_RESULT_LIMIT = 24;
+const AI_CACHE_LIMIT = 24;
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.PowerPoint) {
@@ -134,7 +166,7 @@ async function init() {
       sortMode = isValidSortMode(value) ? value : "az";
       persistSortMode();
       clearSearchCache();
-      requestRender();
+      scheduleSearch({ immediate: true });
     });
     syncSortSelect();
   }
@@ -148,10 +180,16 @@ async function init() {
     grid.addEventListener("click", handleGridClick);
     grid.addEventListener("keydown", handleGridKeydown);
   }
+  initSettingsPanel();
   initZipDropzone();
   initZipSummaryToggle();
+  initAiControls();
+  window.addEventListener("scroll", scheduleScrollSync, { passive: true });
 
   updateSearchClear();
+  syncAiToggle();
+  syncAiSettingsStatus();
+  syncScrollState();
   await hydrateLocalCacheMeta();
   await loadLogos();
 }
@@ -185,6 +223,13 @@ function restorePreferences() {
   if (replaceToggle) {
     replaceToggle.checked = replaceSelectionEnabled;
   }
+  const storedAiEnabled = safeStorageGet(STORAGE_KEYS.aiEnabled);
+  aiEnabled = storedAiEnabled === "1";
+  aiApiKey = safeStorageGet(STORAGE_KEYS.aiApiKey) || "";
+  if (aiApiKeyInput) {
+    aiApiKeyInput.value = aiApiKey;
+  }
+  loadAiCacheFromStorage();
 }
 
 function persistKeywordFilter() {
@@ -207,6 +252,18 @@ function persistReplaceSelection() {
   );
 }
 
+function persistAiEnabled() {
+  safeStorageSet(STORAGE_KEYS.aiEnabled, aiEnabled ? "1" : "0");
+}
+
+function persistAiApiKey() {
+  if (!aiApiKey) {
+    safeStorageRemove(STORAGE_KEYS.aiApiKey);
+    return;
+  }
+  safeStorageSet(STORAGE_KEYS.aiApiKey, aiApiKey);
+}
+
 function safeStorageGet(key) {
   try {
     return window.localStorage ? window.localStorage.getItem(key) : null;
@@ -224,6 +281,206 @@ function safeStorageSet(key, value) {
   }
 }
 
+function safeStorageRemove(key) {
+  try {
+    if (!window.localStorage) return;
+    window.localStorage.removeItem(key);
+  } catch (error) {
+    // Ignore storage errors.
+  }
+}
+
+function initSettingsPanel() {
+  if (!settingsButton || !settingsPanel) return;
+  settingsButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setSettingsPanelOpen(!settingsPanelOpen);
+  });
+  document.addEventListener("click", (event) => {
+    if (!settingsPanelOpen) return;
+    if (
+      settingsPanel.contains(event.target) ||
+      settingsButton.contains(event.target)
+    ) {
+      return;
+    }
+    setSettingsPanelOpen(false);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && settingsPanelOpen) {
+      setSettingsPanelOpen(false);
+    }
+  });
+}
+
+function setSettingsPanelOpen(isOpen) {
+  settingsPanelOpen = Boolean(isOpen);
+  if (settingsButton) {
+    settingsButton.setAttribute("aria-expanded", settingsPanelOpen ? "true" : "false");
+  }
+  if (settingsPanel) {
+    settingsPanel.classList.toggle("hidden", !settingsPanelOpen);
+    settingsPanel.setAttribute("aria-hidden", settingsPanelOpen ? "false" : "true");
+  }
+}
+
+function initAiControls() {
+  if (aiToggle) {
+    aiToggle.addEventListener("click", handleAiToggle);
+  }
+  if (aiApiSave) {
+    aiApiSave.addEventListener("click", () => {
+      const nextValue = aiApiKeyInput ? aiApiKeyInput.value.trim() : "";
+      aiApiKey = nextValue;
+      persistAiApiKey();
+      syncAiSettingsStatus(aiApiKey ? "Clé API enregistrée localement." : "Clé supprimée.");
+      syncAiToggle();
+      scheduleSearch({ immediate: true });
+    });
+  }
+  if (aiApiClear) {
+    aiApiClear.addEventListener("click", () => {
+      aiApiKey = "";
+      if (aiApiKeyInput) {
+        aiApiKeyInput.value = "";
+      }
+      persistAiApiKey();
+      clearAiSearchState({ keepCache: false });
+      syncAiSettingsStatus("Clé supprimée. Le mode IA ne peut plus appeler OpenAI.");
+      syncAiToggle();
+      requestRender();
+    });
+  }
+}
+
+function handleAiToggle() {
+  const nextState = !aiEnabled;
+  if (nextState && !aiApiKey) {
+    aiEnabled = false;
+    persistAiEnabled();
+    syncAiToggle();
+    syncAiSettingsStatus("Ajoutez une clé API OpenAI avant d'activer le mode IA.");
+    setSettingsPanelOpen(true);
+    setStatus("Ajoutez une clé API OpenAI dans Réglages pour activer le mode IA.", "error");
+    return;
+  }
+  aiEnabled = nextState;
+  persistAiEnabled();
+  if (!aiEnabled) {
+    clearAiSearchState();
+  }
+  syncAiToggle();
+  syncAiSettingsStatus();
+  scheduleSearch({ immediate: true });
+}
+
+function syncAiToggle() {
+  if (!aiToggle) return;
+  aiToggle.classList.toggle("is-active", aiEnabled);
+  aiToggle.classList.toggle("is-loading", aiSearchState.loading);
+  aiToggle.classList.toggle("is-disabled", aiEnabled && !aiApiKey);
+  aiToggle.setAttribute("aria-pressed", aiEnabled ? "true" : "false");
+  aiToggle.setAttribute(
+    "aria-label",
+    aiEnabled ? "Désactiver le mode IA" : "Activer le mode IA"
+  );
+  aiToggle.title = aiEnabled ? "Mode IA activé" : "Mode IA désactivé";
+}
+
+function syncAiSettingsStatus(message = "") {
+  if (!aiSettingsStatus) return;
+  if (message) {
+    aiSettingsStatus.textContent = message;
+    return;
+  }
+  if (!aiApiKey) {
+    aiSettingsStatus.textContent = "Clé absente. Le mode IA restera désactivé.";
+    return;
+  }
+  if (aiEnabled) {
+    aiSettingsStatus.textContent = `Mode IA prêt sur ${AI_MODEL}. La clé est stockée localement dans ce navigateur.`;
+    return;
+  }
+  aiSettingsStatus.textContent = `Clé disponible. Activez le bouton IA dans la barre de recherche pour utiliser ${AI_MODEL}.`;
+}
+
+function scheduleScrollSync() {
+  if (scrollFrame) return;
+  scrollFrame = requestAnimationFrame(() => {
+    scrollFrame = null;
+    syncScrollState();
+  });
+}
+
+function syncScrollState() {
+  document.body.classList.toggle("is-scrolled", window.scrollY > 16);
+}
+
+function clearAiSearchState(options = {}) {
+  const { keepCache = true } = options;
+  aiSearchState = {
+    query: "",
+    resultIds: [],
+    loading: false,
+    error: "",
+    requestId: aiSearchState.requestId + 1,
+    source: "local"
+  };
+  if (!keepCache) {
+    aiSearchCache = new Map();
+    persistAiSearchCache();
+  }
+  syncAiToggle();
+}
+
+function loadAiCacheFromStorage() {
+  aiSearchCache = new Map();
+  const raw = safeStorageGet(STORAGE_KEYS.aiSearchCache);
+  if (!raw) return;
+  try {
+    const entries = JSON.parse(raw);
+    if (!Array.isArray(entries)) return;
+    for (const entry of entries) {
+      if (!entry || typeof entry.key !== "string" || !Array.isArray(entry.resultIds)) {
+        continue;
+      }
+      aiSearchCache.set(entry.key, {
+        resultIds: entry.resultIds.filter(Number.isFinite),
+        source: entry.source || "cache",
+        createdAt: Number(entry.createdAt) || Date.now()
+      });
+    }
+  } catch (error) {
+    aiSearchCache = new Map();
+  }
+}
+
+function persistAiSearchCache() {
+  const entries = Array.from(aiSearchCache.entries())
+    .slice(-AI_CACHE_LIMIT)
+    .map(([key, value]) => ({
+      key,
+      resultIds: Array.isArray(value.resultIds) ? value.resultIds.slice(0, AI_RESULT_LIMIT) : [],
+      source: value.source || "cache",
+      createdAt: Number(value.createdAt) || Date.now()
+    }));
+  safeStorageSet(STORAGE_KEYS.aiSearchCache, JSON.stringify(entries));
+}
+
+function saveAiCacheEntry(key, value) {
+  if (!key || !value) return;
+  aiSearchCache.set(key, {
+    resultIds: Array.isArray(value.resultIds) ? value.resultIds.slice(0, AI_RESULT_LIMIT) : [],
+    source: value.source || "ai",
+    createdAt: Date.now()
+  });
+  while (aiSearchCache.size > AI_CACHE_LIMIT) {
+    const oldestKey = aiSearchCache.keys().next().value;
+    aiSearchCache.delete(oldestKey);
+  }
+  persistAiSearchCache();
+}
+
 function isValidSortMode(value) {
   return ["az", "recent", "favorites"].includes(value);
 }
@@ -231,6 +488,10 @@ function isValidSortMode(value) {
 function syncSortSelect() {
   if (!sortSelect) return;
   sortSelect.value = sortMode;
+}
+
+function getLogoStorageKey(logo) {
+  return logo?.storageKey || logo?.entryName || logo?.name || "";
 }
 
 function loadFavoritesFromStorage() {
@@ -259,10 +520,17 @@ function loadRecentsFromStorage() {
     const items = JSON.parse(raw);
     if (Array.isArray(items)) {
       items.forEach((entry) => {
-        if (!entry || typeof entry.name !== "string") return;
+        if (!entry) return;
+        const key =
+          typeof entry.key === "string" && entry.key.trim()
+            ? entry.key
+            : typeof entry.name === "string"
+              ? entry.name
+              : "";
+        if (!key) return;
         const usedAt = Number(entry.usedAt) || 0;
         if (usedAt > 0) {
-          recentMap.set(entry.name, usedAt);
+          recentMap.set(key, usedAt);
         }
       });
     }
@@ -280,7 +548,7 @@ function persistFavorites() {
 
 function persistRecents() {
   const entries = Array.from(recentMap.entries())
-    .map(([name, usedAt]) => ({ name, usedAt }))
+    .map(([key, usedAt]) => ({ key, usedAt }))
     .sort((a, b) => b.usedAt - a.usedAt)
     .slice(0, RECENT_LIMIT);
   safeStorageSet(STORAGE_KEYS.recents, JSON.stringify(entries));
@@ -293,13 +561,15 @@ function scheduleSearch(options = {}) {
     searchTimer = null;
   }
   if (immediate) {
-    requestRender();
+    void runSearchCycle();
     return;
   }
+  const query = getNormalizedSearchQuery();
+  const delay = shouldUseAiSearch(query) ? AI_SEARCH_DEBOUNCE_MS : SEARCH_DEBOUNCE_MS;
   searchTimer = setTimeout(() => {
     searchTimer = null;
-    requestRender();
-  }, SEARCH_DEBOUNCE_MS);
+    void runSearchCycle();
+  }, delay);
 }
 
 function requestRender() {
@@ -308,8 +578,40 @@ function requestRender() {
   }
   renderFrame = requestAnimationFrame(() => {
     renderFrame = null;
-    renderLogos(filterLogos());
+    renderLogos(getRenderableLogos());
   });
+}
+
+async function runSearchCycle() {
+  const query = getNormalizedSearchQuery();
+  if (!shouldUseAiSearch(query)) {
+    clearAiSearchState();
+    requestRender();
+    return;
+  }
+  requestRender();
+  await requestAiSearch(query);
+}
+
+function getNormalizedSearchQuery() {
+  return normalizeSearchText(searchInput?.value.trim() || "");
+}
+
+function shouldUseAiSearch(query) {
+  return Boolean(aiEnabled && query && query.length >= 2);
+}
+
+function getRenderableLogos() {
+  const query = getNormalizedSearchQuery();
+  if (
+    shouldUseAiSearch(query) &&
+    aiSearchState.query === query &&
+    Array.isArray(aiSearchState.resultIds) &&
+    aiSearchState.resultIds.length
+  ) {
+    return applyKeywordFilter(resolveAiResultIds(aiSearchState.resultIds));
+  }
+  return filterLogos();
 }
 
 function handleGridClick(event) {
@@ -468,7 +770,11 @@ async function loadLocalLogos(options = {}) {
     wordnetMap = await getWordnetMap();
     allLogos = attachKeywords(localLogosCache, keywordsMap);
     buildSearchIndex(allLogos);
+    clearAiSearchState();
     requestRender();
+    if (shouldUseAiSearch(getNormalizedSearchQuery())) {
+      void requestAiSearch(getNormalizedSearchQuery());
+    }
     setStatus(allLogos.length ? "" : "Aucun logo SVG trouvé dans le ZIP local.");
   } catch (error) {
     console.error(error);
@@ -491,22 +797,23 @@ async function handleZipFile(file) {
 
   try {
     const buffer = await file.arrayBuffer();
-    clearLogoCaches();
-    resetZipSession();
-    const parsed = await loadZipBuffer(buffer);
+    const previewSession = createMainZipSession();
+    const parsed = await previewSession.load(buffer);
+    previewSession.reset();
     if (!parsed.items.length) {
-      renderEmptyState("Aucun SVG trouvé dans le ZIP.");
       setStatus("Aucun SVG trouvé dans le ZIP.", "error");
       return;
     }
+    clearLogoCaches();
+    resetZipSession({ terminate: true });
+    await loadZipBuffer(buffer);
     const meta = {
       name: file.name,
       size: file.size,
       count: parsed.items.length,
       updatedAt: Date.now()
     };
-    localZipRecord = { meta };
-    localLogosCache = parsed.items;
+    localZipRecord = { meta, buffer };
     updateZipMeta(meta);
     await saveZipCache(buffer, meta);
 
@@ -624,6 +931,14 @@ function compareBySortMode(a, b) {
   return a.name.localeCompare(b.name);
 }
 
+function applyKeywordFilter(logos) {
+  return logos.filter((logo) => {
+    if (keywordFilterState === "with") return logo.hasKeywords;
+    if (keywordFilterState === "without") return !logo.hasKeywords;
+    return true;
+  });
+}
+
 function filterLogos() {
   const query = normalizeSearchText(searchInput.value.trim());
   const cacheKey = `${keywordFilterState}|${sortMode}|${query}`;
@@ -658,11 +973,7 @@ function filterLogos() {
     }
   }
 
-  const filtered = candidates.filter((logo) => {
-    if (keywordFilterState === "with") return logo.hasKeywords;
-    if (keywordFilterState === "without") return !logo.hasKeywords;
-    return true;
-  });
+  const filtered = applyKeywordFilter(candidates);
 
   let sorted = [];
   if (queryTokens.length) {
@@ -707,14 +1018,393 @@ function sortLogos(logos) {
   return list;
 }
 
+async function requestAiSearch(query) {
+  if (!query || !aiEnabled || !aiApiKey || !allLogos.length) {
+    return;
+  }
+  const cacheKey = buildAiSearchCacheKey(query);
+  const cached = aiSearchCache.get(cacheKey);
+  if (cached && Array.isArray(cached.resultIds) && cached.resultIds.length) {
+    aiSearchState = {
+      query,
+      resultIds: cached.resultIds,
+      loading: false,
+      error: "",
+      requestId: aiSearchState.requestId + 1,
+      source: cached.source || "cache"
+    };
+    syncAiToggle();
+    requestRender();
+    return;
+  }
+
+  const requestId = aiSearchState.requestId + 1;
+  aiSearchState = {
+    query,
+    resultIds: aiSearchState.query === query ? aiSearchState.resultIds : [],
+    loading: true,
+    error: "",
+    requestId,
+    source: "pending"
+  };
+  syncAiToggle();
+
+  try {
+    const expansion =
+      allLogos.length <= AI_FULL_SCAN_LIMIT
+        ? createFallbackAiExpansion(query)
+        : await expandQueryWithAi(query);
+    if (requestId !== aiSearchState.requestId) {
+      return;
+    }
+    const candidates = collectAiCandidates(query, expansion);
+    const ranking = await rankAiCandidates(query, expansion, candidates);
+    if (requestId !== aiSearchState.requestId) {
+      return;
+    }
+
+    let resultIds = Array.isArray(ranking.orderedIds)
+      ? ranking.orderedIds.filter(Number.isFinite)
+      : [];
+    resultIds = completeAiResultIds(resultIds, candidates);
+
+    aiSearchState = {
+      query,
+      resultIds,
+      loading: false,
+      error: "",
+      requestId,
+      source: "ai"
+    };
+    saveAiCacheEntry(cacheKey, { resultIds, source: "ai" });
+    syncAiSettingsStatus(
+      resultIds.length
+        ? `Mode IA actif sur ${AI_MODEL}. ${resultIds.length} résultat${resultIds.length > 1 ? "s" : ""} reranké${resultIds.length > 1 ? "s" : ""}.`
+        : `Mode IA actif sur ${AI_MODEL}, sans résultat exploitable pour cette requête.`
+    );
+    syncAiToggle();
+    requestRender();
+  } catch (error) {
+    if (requestId !== aiSearchState.requestId) {
+      return;
+    }
+    aiSearchState = {
+      query,
+      resultIds: [],
+      loading: false,
+      error: error?.message || String(error || "Erreur IA."),
+      requestId,
+      source: "error"
+    };
+    syncAiSettingsStatus(
+      `Erreur IA : ${aiSearchState.error}. La recherche locale reste disponible.`
+    );
+    syncAiToggle();
+    requestRender();
+  }
+}
+
+function createFallbackAiExpansion(query) {
+  const tokens = tokenizeSearchText(query).slice(0, 6);
+  return {
+    coreConcepts: tokens,
+    visualMetaphors: [],
+    concreteObjects: tokens,
+    relatedKeywords: tokens
+  };
+}
+
+async function expandQueryWithAi(query) {
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "core_concepts",
+      "visual_metaphors",
+      "concrete_objects",
+      "related_keywords"
+    ],
+    properties: {
+      core_concepts: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: 6
+      },
+      visual_metaphors: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: 6
+      },
+      concrete_objects: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: 6
+      },
+      related_keywords: {
+        type: "array",
+        items: { type: "string" },
+        maxItems: 8
+      }
+    }
+  };
+  const payload = await callOpenAiJson({
+    schemaName: "pictogram_query_expansion",
+    schema,
+    systemPrompt:
+      "You are a compact multilingual query-expansion engine for pictogram search in presentation software. Translate abstract ideas into short visualizable concepts and concrete icon labels. Return only lowercase short phrases with no explanations.",
+    userPrompt: `Query: ${query}`
+  });
+  return {
+    coreConcepts: normalizeAiTerms(payload.core_concepts),
+    visualMetaphors: normalizeAiTerms(payload.visual_metaphors),
+    concreteObjects: normalizeAiTerms(payload.concrete_objects),
+    relatedKeywords: normalizeAiTerms(payload.related_keywords)
+  };
+}
+
+function collectAiCandidates(query, expansion) {
+  if (allLogos.length <= AI_FULL_SCAN_LIMIT) {
+    return allLogos.slice();
+  }
+
+  const buckets = [
+    { terms: [query], weight: 160 },
+    { terms: expansion.coreConcepts, weight: 120 },
+    { terms: expansion.concreteObjects, weight: 92 },
+    { terms: expansion.visualMetaphors, weight: 72 },
+    { terms: expansion.relatedKeywords, weight: 56 }
+  ];
+
+  const scored = [];
+  for (const logo of allLogos) {
+    const text = logo.searchText || "";
+    let score = 0;
+    for (const bucket of buckets) {
+      for (const term of bucket.terms || []) {
+        score += bucket.weight * scoreAiPhraseMatch(text, term);
+      }
+    }
+    if (score <= 0) continue;
+    if (logo.isFavorite) score += 6;
+    if (logo.lastUsedAt) score += 2;
+    scored.push({ logo, score });
+  }
+
+  scored.sort((a, b) => {
+    const delta = b.score - a.score;
+    if (delta !== 0) return delta;
+    return compareBySortMode(a.logo, b.logo);
+  });
+
+  if (!scored.length) {
+    return sortLogos(allLogos).slice(0, Math.min(AI_CANDIDATE_LIMIT, AI_SCAN_FALLBACK_LIMIT));
+  }
+
+  return scored.slice(0, AI_CANDIDATE_LIMIT).map((entry) => entry.logo);
+}
+
+function scoreAiPhraseMatch(searchText, phrase) {
+  const normalized = normalizeSearchText(phrase);
+  if (!normalized || !searchText) return 0;
+  const tokens = tokenizeSearchText(normalized);
+  if (!tokens.length) return 0;
+  let matched = 0;
+  for (const token of tokens) {
+    if (searchText.includes(token)) {
+      matched += 1;
+    }
+  }
+  if (!matched) return 0;
+  const ratio = matched / tokens.length;
+  const phraseBonus = searchText.includes(normalized) ? 0.35 : 0;
+  return ratio + phraseBonus;
+}
+
+async function rankAiCandidates(query, expansion, candidates) {
+  if (!candidates.length) {
+    return { orderedIds: [] };
+  }
+  if (candidates.length === 1) {
+    return { orderedIds: [candidates[0].id] };
+  }
+
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["ordered_ids", "note"],
+    properties: {
+      ordered_ids: {
+        type: "array",
+        items: { type: "integer" },
+        maxItems: AI_RESULT_LIMIT
+      },
+      note: {
+        type: "string"
+      }
+    }
+  };
+
+  const lines = candidates.map((logo) => {
+    const label = stripSvgExtension(logo.name);
+    const keywords = Array.isArray(logo.keywords) ? logo.keywords.slice(0, 5).join(", ") : "";
+    return `${logo.id} | ${label}${keywords ? ` | ${keywords}` : ""}`;
+  });
+
+  const payload = await callOpenAiJson({
+    schemaName: "pictogram_candidate_ranking",
+    schema,
+    systemPrompt:
+      "You rank pictogram candidates for presentation slides. Prefer icons a human would actually use to communicate the query on one slide. Reward direct matches first, then strong metaphors, then concrete substitutes. Avoid duplicates and generic noise. Return only JSON.",
+    userPrompt: [
+      `Query: ${query}`,
+      `Expanded concepts: ${(expansion.coreConcepts || []).join(", ") || "-"}`,
+      `Visual metaphors: ${(expansion.visualMetaphors || []).join(", ") || "-"}`,
+      `Concrete objects: ${(expansion.concreteObjects || []).join(", ") || "-"}`,
+      `Related keywords: ${(expansion.relatedKeywords || []).join(", ") || "-"}`,
+      "Candidates:",
+      lines.join("\n")
+    ].join("\n")
+  });
+
+  return {
+    orderedIds: Array.isArray(payload.ordered_ids) ? payload.ordered_ids : [],
+    note: payload.note || ""
+  };
+}
+
+async function callOpenAiJson(options) {
+  const { schemaName, schema, systemPrompt, userPrompt } = options;
+  const response = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${aiApiKey}`
+    },
+    body: JSON.stringify({
+      model: AI_MODEL,
+      temperature: 0.2,
+      store: false,
+      user: getOrCreateAiAnonId(),
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: schemaName,
+          strict: true,
+          schema
+        }
+      },
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenAI ${response.status}: ${errorText}`);
+  }
+
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error("Réponse IA vide.");
+  }
+  return JSON.parse(content);
+}
+
+function normalizeAiTerms(list) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const output = [];
+  for (const item of list) {
+    const normalized = normalizeSearchText(item);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    output.push(normalized);
+  }
+  return output;
+}
+
+function buildAiSearchCacheKey(query) {
+  return `${AI_MODEL}|${getZipFingerprint()}|${query}`;
+}
+
+function getOrCreateAiAnonId() {
+  const existing = safeStorageGet(STORAGE_KEYS.aiAnonId);
+  if (existing) return existing;
+  const next =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? `logos-ppt-${crypto.randomUUID()}`
+      : `logos-ppt-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  safeStorageSet(STORAGE_KEYS.aiAnonId, next);
+  return next;
+}
+
+function getZipFingerprint() {
+  const meta = localZipRecord?.meta || {};
+  return [
+    meta.name || "zip",
+    meta.updatedAt || 0,
+    meta.size || 0,
+    meta.count || allLogos.length
+  ].join("|");
+}
+
+function resolveAiResultIds(ids) {
+  const seen = new Set();
+  const logos = [];
+  for (const id of ids) {
+    if (!Number.isFinite(id) || seen.has(id)) continue;
+    const logo = logoById.get(id);
+    if (!logo) continue;
+    seen.add(id);
+    logos.push(logo);
+  }
+  return logos;
+}
+
+function completeAiResultIds(ids, candidates) {
+  const seen = new Set();
+  const output = [];
+  for (const id of ids) {
+    if (!Number.isFinite(id) || seen.has(id)) continue;
+    const logo = logoById.get(id);
+    if (!logo) continue;
+    seen.add(id);
+    output.push(id);
+    if (output.length >= AI_RESULT_LIMIT) {
+      return output;
+    }
+  }
+  for (const logo of candidates) {
+    if (!logo || !Number.isFinite(logo.id) || seen.has(logo.id)) continue;
+    seen.add(logo.id);
+    output.push(logo.id);
+    if (output.length >= AI_RESULT_LIMIT) {
+      break;
+    }
+  }
+  return output;
+}
+
+function stripSvgExtension(value) {
+  return String(value || "").replace(/\.svg$/i, "");
+}
+
 function attachKeywords(items, map) {
   return items.map((logo) => {
     const keywords = map.get(logo.name) || [];
-    const searchText = buildSearchText(logo.name, keywords);
-    const lastUsedAt = recentMap.get(logo.name) || 0;
-    const isFavorite = favoriteSet.has(logo.name);
+    const searchLabel = [logo.name, logo.displayName, logo.entryName]
+      .filter(Boolean)
+      .join(" ");
+    const searchText = buildSearchText(searchLabel, keywords);
+    const storageKey = getLogoStorageKey(logo);
+    const lastUsedAt = recentMap.get(storageKey) || recentMap.get(logo.name) || 0;
+    const isFavorite = favoriteSet.has(storageKey) || favoriteSet.has(logo.name);
     return {
       ...logo,
+      storageKey,
       keywords,
       hasKeywords: Array.isArray(keywords) && keywords.length > 0,
       searchText,
@@ -875,7 +1565,7 @@ function createLogoCard(logo, index, maxScore) {
   }
   card.setAttribute("role", "button");
   card.setAttribute("tabindex", "0");
-  card.setAttribute("aria-label", `Insérer ${logo.name}`);
+  card.setAttribute("aria-label", `Insérer ${logo.displayName || logo.name}`);
   card.style.animationDelay = `${index * 20}ms`;
   card.dataset.logoId = String(logo.id ?? index);
   const score = Number(logo.relevanceScore) || 0;
@@ -986,10 +1676,12 @@ function toggleFavoriteById(logoId, button) {
   const logo = logoById.get(logoId);
   if (!logo || !logo.name) return;
   const nextState = !logo.isFavorite;
+  const key = getLogoStorageKey(logo);
   logo.isFavorite = nextState;
   if (nextState) {
-    favoriteSet.add(logo.name);
+    favoriteSet.add(key);
   } else {
+    favoriteSet.delete(key);
     favoriteSet.delete(logo.name);
   }
   persistFavorites();
@@ -1011,7 +1703,7 @@ function updateFavoriteButton(button, isFavorite) {
 function recordRecent(logo) {
   if (!logo || !logo.name) return;
   const usedAt = Date.now();
-  recentMap.set(logo.name, usedAt);
+  recentMap.set(getLogoStorageKey(logo), usedAt);
   logo.lastUsedAt = usedAt;
   persistRecents();
   clearSearchCache();
@@ -1039,10 +1731,11 @@ async function ensureLogoUrl(logo) {
 async function getSvgText(logo) {
   if (logo.svgText) return logo.svgText;
   if (logo.svgPromise) return logo.svgPromise;
-  if (!logo.name) {
+  const entryName = logo.entryName || logo.name;
+  if (!entryName) {
     throw new Error("SVG introuvable en local.");
   }
-  logo.svgPromise = fetchSvgTextFromZip(logo.name).then((text) => {
+  logo.svgPromise = fetchSvgTextFromZip(entryName).then((text) => {
     logo.svgText = text;
     return text;
   });
@@ -1459,6 +2152,7 @@ function revokeLocalUrls() {
 function clearLogoCaches() {
   revokeLocalUrls();
   clearSearchCache();
+  clearAiSearchState();
   allLogos = [];
   logoById = new Map();
   tokenIndex = new Map();
@@ -1554,8 +2248,8 @@ function createMainZipSession() {
       if (!zip) {
         throw new Error("ZIP non chargé.");
       }
-      const entryName = entryMap.get(name);
-      if (!entryName) {
+      const entryName = entryMap.get(name) || name;
+      if (!entryName || !zip.file(entryName)) {
         throw new Error("SVG introuvable dans le ZIP.");
       }
       const svgText = await zip.file(entryName).async("text");
@@ -1569,7 +2263,7 @@ function createMainZipSession() {
 }
 
 function collectZipEntries(zip) {
-  const items = [];
+  const rawItems = [];
   const entryMap = new Map();
   let ignored = 0;
   let duplicates = 0;
@@ -1587,14 +2281,17 @@ function collectZipEntries(zip) {
       ignored += 1;
       return;
     }
-    if (entryMap.has(name)) {
+    const entryName = normalizeZipEntryName(entry.name);
+    if (entryMap.has(entryName)) {
       duplicates += 1;
       return;
     }
-    entryMap.set(name, entry.name);
-    items.push({
-      id: 0,
+    entryMap.set(entryName, entryName);
+    rawItems.push({
       name,
+      displayName: "",
+      entryName,
+      storageKey: entryName,
       ext: "svg",
       url: null,
       svgText: null,
@@ -1603,7 +2300,18 @@ function collectZipEntries(zip) {
     });
   });
 
-  items.sort((a, b) => a.name.localeCompare(b.name));
+  rawItems.sort((a, b) => a.entryName.localeCompare(b.entryName));
+  const nameCount = new Map();
+  rawItems.forEach((item) => {
+    nameCount.set(item.name, (nameCount.get(item.name) || 0) + 1);
+  });
+  const items = rawItems.map((item) => ({
+    ...item,
+    displayName:
+      (nameCount.get(item.name) || 0) > 1
+        ? buildZipDisplayName(item.entryName)
+        : stripSvgExtension(item.name)
+  }));
   items.forEach((item, index) => {
     item.id = index;
   });
@@ -1668,6 +2376,23 @@ function extractFileName(filePath) {
   if (!filePath) return "";
   const normalized = filePath.replace(/\\/g, "/");
   return normalized.split("/").pop();
+}
+
+function normalizeZipEntryName(filePath) {
+  return String(filePath || "").replace(/\\/g, "/");
+}
+
+function buildZipDisplayName(entryName) {
+  const normalized = normalizeZipEntryName(entryName);
+  const parts = normalized.split("/").filter(Boolean);
+  if (!parts.length) {
+    return stripSvgExtension(entryName);
+  }
+  const last = stripSvgExtension(parts.pop());
+  if (!parts.length) {
+    return last;
+  }
+  return `${last} (${parts.slice(-1)[0]})`;
 }
 
 function createSvgUrl(svgText) {

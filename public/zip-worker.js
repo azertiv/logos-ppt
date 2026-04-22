@@ -42,7 +42,7 @@ async function handleLoadZip(buffer) {
 
   zipInstance = await JSZip.loadAsync(buffer);
   entryMap = new Map();
-  const items = [];
+  const rawItems = [];
   let ignored = 0;
   let duplicates = 0;
 
@@ -59,19 +59,34 @@ async function handleLoadZip(buffer) {
       ignored += 1;
       return;
     }
-    if (entryMap.has(name)) {
+    const entryName = normalizeZipEntryName(entry.name);
+    if (entryMap.has(entryName)) {
       duplicates += 1;
       return;
     }
-    entryMap.set(name, entry.name);
-    items.push({
+    entryMap.set(entryName, entryName);
+    rawItems.push({
       name,
+      displayName: "",
+      entryName,
+      storageKey: entryName,
       ext: "svg",
       source: "local"
     });
   });
 
-  items.sort((a, b) => a.name.localeCompare(b.name));
+  rawItems.sort((a, b) => a.entryName.localeCompare(b.entryName));
+  const nameCount = new Map();
+  rawItems.forEach((item) => {
+    nameCount.set(item.name, (nameCount.get(item.name) || 0) + 1);
+  });
+  const items = rawItems.map((item) => ({
+    ...item,
+    displayName:
+      (nameCount.get(item.name) || 0) > 1
+        ? buildZipDisplayName(item.entryName)
+        : stripSvgExtension(item.name)
+  }));
 
   return {
     items,
@@ -90,8 +105,8 @@ async function handleGetSvg(name) {
   if (!name) {
     throw new Error("Nom de fichier manquant.");
   }
-  const entryName = entryMap.get(name);
-  if (!entryName) {
+  const entryName = entryMap.get(name) || name;
+  if (!entryName || !zipInstance.file(entryName)) {
     throw new Error("SVG introuvable dans le ZIP.");
   }
   const svgText = await zipInstance.file(entryName).async("text");
@@ -102,6 +117,27 @@ function extractFileName(filePath) {
   if (!filePath) return "";
   const normalized = filePath.replace(/\\/g, "/");
   return normalized.split("/").pop();
+}
+
+function normalizeZipEntryName(filePath) {
+  return String(filePath || "").replace(/\\/g, "/");
+}
+
+function stripSvgExtension(value) {
+  return String(value || "").replace(/\.svg$/i, "");
+}
+
+function buildZipDisplayName(entryName) {
+  const normalized = normalizeZipEntryName(entryName);
+  const parts = normalized.split("/").filter(Boolean);
+  if (!parts.length) {
+    return stripSvgExtension(entryName);
+  }
+  const last = stripSvgExtension(parts.pop());
+  if (!parts.length) {
+    return last;
+  }
+  return `${last} (${parts.slice(-1)[0]})`;
 }
 
 function respond(id, payload) {

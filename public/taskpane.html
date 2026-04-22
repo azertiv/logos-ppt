@@ -15,76 +15,147 @@
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   </head>
   <body>
-    <div class="app">
-      <header class="header">
-        <div class="brand">
-          <span class="brand-dot"></span>
-          <div>
-            <h1>Neurow.Pictos</h1>
-            <p>Insérez les logos officiels dans vos slides.</p>
+    <div class="app-shell">
+      <div class="app">
+        <header class="header">
+          <div class="brand">
+            <span class="brand-dot"></span>
+            <div>
+              <h1>Neurow.Pictos</h1>
+              <p>Insérez les logos officiels dans vos slides.</p>
+            </div>
           </div>
-        </div>
-      </header>
+          <button
+            id="settings-button"
+            class="settings-button"
+            type="button"
+            aria-label="Ouvrir les réglages"
+            aria-controls="settings-panel"
+            aria-expanded="false"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M19.14 12.94a7.43 7.43 0 0 0 .05-.94 7.43 7.43 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.21 7.21 0 0 0-1.63-.94l-.36-2.54a.49.49 0 0 0-.49-.42h-3.84a.49.49 0 0 0-.49.42l-.36 2.54c-.58.22-1.12.53-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.03.31-.05.62-.05.94s.02.63.05.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.41 1.05.73 1.63.94l.36 2.54a.49.49 0 0 0 .49.42h3.84a.49.49 0 0 0 .49-.42l.36-2.54a7.21 7.21 0 0 0 1.63-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64zm-7.14 2.56A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"
+              />
+            </svg>
+          </button>
+        </header>
 
-      <section class="controls">
-        <label class="search">
-          <span>Recherche</span>
-          <div class="search-field">
-            <input id="search-input" type="search" placeholder="Tapez un mot-clé…" />
-            <button id="search-clear" class="search-clear hidden" type="button" aria-label="Effacer la recherche">
-              ×
-            </button>
-          </div>
-        </label>
-        <label class="density">
-          <span>Logos par ligne</span>
-          <div class="density-field">
-            <input id="density-range" type="range" min="1" max="4" step="1" value="3" />
-            <span id="density-value" class="density-value">3</span>
-          </div>
-        </label>
-        <label class="sort">
-          <span>Tri</span>
-          <select id="sort-select" class="select">
-            <option value="az">A-Z</option>
-            <option value="recent">Récents</option>
-            <option value="favorites">Favoris</option>
-          </select>
-        </label>
-        <button id="keyword-toggle" class="toggle" type="button" aria-pressed="false">Keywords</button>
-        <label class="checkbox">
-          <input id="replace-toggle" type="checkbox" />
-          <span>Remplacer la sélection</span>
-        </label>
-      </section>
+        <aside id="settings-panel" class="settings-panel hidden" aria-hidden="true">
+          <div class="settings-panel-inner">
+            <section class="settings-card">
+              <div class="settings-intro">
+                <h2>Réglages</h2>
+                <p>Source ZIP, affichage et recherche assistée.</p>
+              </div>
+            </section>
 
-      <section class="zip-area" id="zip-area">
-        <div id="zip-summary" class="zip-summary hidden">
-          <button id="zip-toggle" class="zip-toggle" type="button" aria-expanded="false">
-            <span id="zip-status-text">ZIP chargé</span>
-            <span class="zip-chevron" aria-hidden="true">⌄</span>
+            <section class="settings-card">
+              <div class="settings-section-title">Bibliothèque ZIP</div>
+              <section class="zip-area" id="zip-area">
+                <div id="zip-summary" class="zip-summary hidden">
+                  <button id="zip-toggle" class="zip-toggle" type="button" aria-expanded="false">
+                    <span id="zip-status-text">ZIP chargé</span>
+                    <span class="zip-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                </div>
+                <div
+                  id="zip-drop"
+                  class="zip-drop"
+                  role="button"
+                  tabindex="0"
+                  aria-label="Importer un ZIP de pictogrammes"
+                >
+                  <input id="zip-input" type="file" accept=".zip,application/zip" />
+                  <div class="zip-copy">
+                    <div class="zip-title">Glissez votre .zip de pictos ici</div>
+                    <div class="zip-subtitle">Ou cliquez pour sélectionner un fichier local.</div>
+                  </div>
+                  <button id="zip-button" class="ghost" type="button">Choisir un fichier</button>
+                </div>
+                <div id="zip-meta" class="zip-meta">Aucun ZIP local chargé.</div>
+              </section>
+            </section>
+
+            <section class="settings-card">
+              <div class="settings-section-title">Affichage</div>
+              <section class="controls">
+                <label class="density">
+                  <span>Logos par ligne</span>
+                  <div class="density-field">
+                    <input id="density-range" type="range" min="1" max="4" step="1" value="3" />
+                    <span id="density-value" class="density-value">3</span>
+                  </div>
+                </label>
+                <label class="sort">
+                  <span>Tri</span>
+                  <select id="sort-select" class="select">
+                    <option value="az">A-Z</option>
+                    <option value="recent">Récents</option>
+                    <option value="favorites">Favoris</option>
+                  </select>
+                </label>
+                <button id="keyword-toggle" class="toggle" type="button" aria-pressed="false">Keywords</button>
+                <label class="checkbox">
+                  <input id="replace-toggle" type="checkbox" />
+                  <span>Remplacer la sélection</span>
+                </label>
+              </section>
+            </section>
+
+            <section class="settings-card">
+              <div class="settings-section-title">Recherche IA</div>
+              <p class="settings-note">
+                Mode sémantique via <strong>gpt-5.4-nano</strong> pour élargir, trier et reranker les
+                résultats. La clé reste locale à ce navigateur.
+              </p>
+              <label class="settings-field">
+                <span>Clé API OpenAI</span>
+                <input
+                  id="ai-api-key-input"
+                  class="settings-input"
+                  type="password"
+                  placeholder="sk-..."
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                />
+              </label>
+              <div class="settings-actions">
+                <button id="ai-api-save" class="primary" type="button">Enregistrer</button>
+                <button id="ai-api-clear" class="ghost" type="button">Supprimer</button>
+              </div>
+              <div id="ai-settings-status" class="settings-meta">
+                Clé absente. Le mode IA restera désactivé.
+              </div>
+            </section>
+          </div>
+        </aside>
+
+        <section id="status" class="status" aria-live="polite"></section>
+
+        <section class="grid" id="logo-grid" aria-live="polite"></section>
+      </div>
+
+      <div class="search-dock" id="search-dock">
+        <div class="search-dock-inner">
+          <div id="logo-count" class="count-bubble">0 logos</div>
+          <label class="search search-floating" aria-label="Recherche">
+            <div class="search-field">
+              <input id="search-input" type="search" placeholder="Tapez un mot-clé ou un concept…" />
+              <button id="ai-toggle" class="ai-toggle" type="button" aria-label="Activer le mode IA" aria-pressed="false">
+                IA
+              </button>
+              <button id="search-clear" class="search-clear hidden" type="button" aria-label="Effacer la recherche">
+                ×
+              </button>
+            </div>
+          </label>
+          <button id="refresh-btn" class="refresh-round" type="button" aria-label="Recharger" title="Recharger">
+            <span aria-hidden="true">↺</span>
           </button>
         </div>
-        <div id="zip-drop" class="zip-drop" role="button" tabindex="0" aria-label="Importer un ZIP de pictogrammes">
-          <input id="zip-input" type="file" accept=".zip,application/zip" />
-          <div class="zip-copy">
-            <div class="zip-title">Glissez votre .zip de pictos ici</div>
-            <div class="zip-subtitle">Ou cliquez pour sélectionner un fichier local.</div>
-          </div>
-          <button id="zip-button" class="ghost" type="button">Choisir un fichier</button>
-        </div>
-        <div id="zip-meta" class="zip-meta">Aucun ZIP local chargé.</div>
-      </section>
-
-      <section id="status" class="status" aria-live="polite"></section>
-
-      <section class="grid" id="logo-grid" aria-live="polite"></section>
-    </div>
-    <div class="count-bar">
-      <div id="logo-count" class="count-bubble">0 logos</div>
-      <button id="refresh-btn" class="refresh-round" type="button" aria-label="Recharger" title="Recharger">
-        <span aria-hidden="true">↺</span>
-      </button>
+      </div>
     </div>
 
     <script src="taskpane.js"></script>
