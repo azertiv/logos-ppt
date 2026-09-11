@@ -1,0 +1,43 @@
+name: Validate Windows companion
+
+on:
+  push:
+    branches: ["companion-background"]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Build the windowless launcher
+        run: dotnet build bridge/windows/Neurow.Pictos.csproj -c Release --nologo
+      - name: Verify protected pairing, current-user startup and process cleanup
+        shell: pwsh
+        run: |
+          $reportPath = Join-Path $env:RUNNER_TEMP 'pictos-native-tests.json'
+          $nodePath = (Get-Command node).Source
+          $testProcess = Start-Process -FilePath 'bridge/windows/bin/Release/net48/Neurow.Pictos.exe' -ArgumentList @('--self-test', '--report', ('"' + $reportPath + '"'), '--node', ('"' + $nodePath + '"')) -PassThru
+          if (-not $testProcess.WaitForExit(90000)) { $testProcess.Kill(); throw 'Native tests timed out.' }
+          Get-Content $reportPath
+          if ($testProcess.ExitCode -ne 0) { throw 'Native tests failed.' }
+      - name: Test the bridge on Windows
+        run: node --test tests/*.test.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: companion-native
+          path: |
+            bridge/windows/bin/Release/net48/Neurow.Pictos.exe
+            bridge/windows/bin/Release/net48/Neurow.Pictos.exe.config
+            ${{ runner.temp }}/pictos-native-tests.json

@@ -2,6 +2,8 @@ node_modules/
 dist/
 .tmp/
 dist-companion/
+bridge/windows/bin/
+bridge/windows/obj/
 
 # Local conversation context is not part of the published source.
 docs/CONTEXTE_PROJET.md
