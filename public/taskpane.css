@@ -149,7 +149,7 @@ h1 {
   padding: 84px 18px calc(var(--dock-height) + 48px);
   background:
     radial-gradient(720px 420px at 100% -10%, rgba(200, 16, 46, 0.08) 0%, transparent 60%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(245, 244, 242, 0.98) 100%);
+    linear-gradient(180deg, #ffffff 0%, #f5f4f2 100%);
   animation: panelIn 180ms ease-out;
 }
 
@@ -457,8 +457,9 @@ input[type="range"] {
   display: grid;
   grid-template-columns: repeat(var(--grid-columns), minmax(0, 1fr));
   gap: 14px;
-  content-visibility: auto;
-  contain-intrinsic-size: 800px;
+  position: relative;
+  display: block;
+  overflow: visible;
 }
 
 .logo-card {
@@ -482,10 +483,10 @@ input[type="range"] {
   justify-content: center;
   cursor: pointer;
   transition: transform 160ms ease, box-shadow 200ms ease, border 200ms ease;
-  animation: riseIn 500ms ease-out both;
+
   position: relative;
   aspect-ratio: 1 / 1;
-  contain: layout paint;
+  contain: layout;
 }
 
 .logo-card:focus {
@@ -823,3 +824,27 @@ body.is-scrolled .search-field {
     transition: none !important;
   }
 }
+
+.codex-limits { white-space: pre-line; overflow-wrap: anywhere; }
+.settings-input { max-width: 100%; }
+.settings-card details summary { cursor: pointer; }
+.settings-card button:disabled { opacity: .55; cursor: wait; }
+
+/* Windowed cards keep layout work proportional to the visible rows. */
+.grid > .logo-card { position: absolute; box-sizing: border-box; padding: clamp(3px, 2vw, 12px); }
+.search-dock-inner { grid-template-columns: auto minmax(72px, 110px) minmax(0, 1fr) auto; }
+.dock-density { display: flex; align-items: center; gap: 7px; padding: 8px 10px; border-radius: 99px; background: rgba(255,255,255,.92); font-size: 12px; }
+.dock-density input { width: 100%; min-width: 0; accent-color: var(--accent); }
+.settings-panel { padding-top: 20px; }
+.settings-intro { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px; }
+.settings-intro p { grid-column: 1 / -1; }
+.settings-open { overflow: hidden; }
+.settings-open .search-dock { visibility: hidden; }
+@media (max-width: 560px) {
+  .search-dock-inner { grid-template-columns: auto minmax(72px, 1fr) auto; grid-template-areas: "count density refresh" "search search search"; }
+  .dock-density { grid-area: density; }
+  .settings-panel { padding-top: 16px; }
+}
+
+.settings-card:first-child { position: sticky; top: -20px; z-index: 2; background: #fff; padding: 12px 0 18px; }
+.grid[data-columns="5"] .favorite-toggle, .grid[data-columns="6"] .favorite-toggle { width: 16px; height: 16px; font-size: 10px; top: 2px; right: 2px; }

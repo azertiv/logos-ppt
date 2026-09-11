@@ -1,4 +1,4 @@
-/* global Office, JSZip */
+/* global Office, JSZip, PictosAiTasks, PictosAiProviders */
 
 const grid = document.getElementById("logo-grid");
 const statusEl = document.getElementById("status");
@@ -44,6 +44,12 @@ let replaceSelectionEnabled = false;
 let settingsPanelOpen = false;
 let aiEnabled = false;
 let aiApiKey = "";
+let aiProvider = "api";
+let codexReady = false;
+let codexClient = null;
+let codexModel = "";
+let codexConnectionVersion = 0;
+let aiRequestController = null;
 let localLogosCache = null;
 let localZipRecord = null;
 let keywordsPromise = null;
@@ -52,13 +58,9 @@ let logoById = new Map();
 let tokenIndex = new Map();
 let searchCache = new Map();
 let searchTimer = null;
-let renderToken = 0;
 let renderFrame = null;
 let lazyObserver = null;
 let zipSession = null;
-let zipWorker = null;
-let zipWorkerRequestId = 0;
-const zipWorkerRequests = new Map();
 let zipPanelExpanded = true;
 let zipPanelToggled = false;
 let insertQueue = Promise.resolve();
@@ -96,6 +98,9 @@ const STORAGE_KEYS = {
   replaceSelection: "logosPptReplaceSelection",
   aiEnabled: "logosPptAiEnabled",
   aiApiKey: "logosPptAiApiKey",
+  aiProvider: "logosPptAiProvider",
+  codexUrl: "logosPptCodexUrl",
+  codexModel: "logosPptCodexModel",
   aiSearchCache: "logosPptAiSearchCache",
   aiAnonId: "logosPptAiAnonId",
   aiUsage: "logosPptAiUsage"
@@ -113,7 +118,21 @@ const SCORE_DIRECT = 100;
 const SCORE_SYNONYM = 12;
 const SEARCH_DEBOUNCE_MS = 140;
 const SEARCH_CACHE_LIMIT = 50;
-const RENDER_BATCH_SIZE = 72;
+let displayedLogos = [];
+let displayedSearchKey = "";
+let displayedMaxScore = 0;
+let gridColumns = 3;
+let gridWindowFrame = null;
+let isComposing = false;
+let aiPending = null;
+let libraryBusy = false;
+let libraryGeneration = 0;
+const previewCache = new Map();
+const PREVIEW_CACHE_LIMIT = 256;
+const PREVIEW_CACHE_BYTES = 16 * 1024 * 1024;
+let previewCacheBytes = 0;
+let initialization;
+let shortcutBusy = false;
 const LAZY_ROOT_MARGIN = "160px";
 const SLIDE_ID_CACHE_MS = 1000;
 const INSERT_BASE_POSITION = { left: 48, top: 48 };
@@ -121,9 +140,8 @@ const INSERT_OFFSET_STEP = { x: 18, y: 18 };
 const INSERT_OFFSET_STEPS = 8;
 const INSERT_RESET_MS = 60000;
 const RECENT_LIMIT = 80;
-const AI_MODEL = "gpt-5.4-nano";
-const OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions";
-const AI_SEARCH_DEBOUNCE_MS = 520;
+const AI_MODEL = "gpt-5.6-luna";
+const AI_SEARCH_DEBOUNCE_MS = 2000;
 const AI_FULL_SCAN_LIMIT = 180;
 const AI_SCAN_FALLBACK_LIMIT = 320;
 const AI_CANDIDATE_LIMIT = 72;
@@ -133,8 +151,10 @@ const AI_KEY_WARNING_MESSAGE = "Ajoutez une clé API OpenAI dans Réglages pour 
 const AI_PRICING_PER_MILLION = {
   input: 0.2,
   cachedInput: 0.02,
-  output: 1.25
+  output: 1.2
 };
+
+if (Office.actions?.associate) Office.actions.associate("SearchSelectedPictogram", searchSelectedPictogram);
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.PowerPoint) {
@@ -142,7 +162,8 @@ Office.onReady((info) => {
     return;
   }
 
-  init().catch((error) => {
+  initialization = init();
+  initialization.catch((error) => {
     console.error(error);
     setStatus("Erreur d'initialisation de l'add-in.", "error");
   });
@@ -151,9 +172,20 @@ Office.onReady((info) => {
 async function init() {
   restorePreferences();
   refreshBtn.addEventListener("click", () => loadLogos({ force: true }));
+  initShortcutControls();
   searchInput.addEventListener("input", () => {
     updateSearchClear();
-    scheduleSearch();
+    if (!isComposing) scheduleSearch();
+  });
+  searchInput.addEventListener("compositionstart", () => { isComposing = true; clearTimeout(searchTimer); clearAiSearchState(); });
+  searchInput.addEventListener("compositionend", () => { isComposing = false; scheduleSearch(); });
+  searchInput.addEventListener("keydown", event => {
+    if (event.key === "Enter" && !event.isComposing && !isComposing) {
+      event.preventDefault(); scheduleSearch({ immediate: true });
+    }
+  });
+  searchInput.addEventListener("blur", () => {
+    if (!isComposing && searchTimer) scheduleSearch({ immediate: true });
   });
   if (searchClear) {
     searchClear.addEventListener("click", () => {
@@ -210,13 +242,15 @@ async function init() {
   initZipSummaryToggle();
   initAiControls();
   window.addEventListener("scroll", scheduleScrollSync, { passive: true });
+  window.addEventListener("scroll", scheduleGridWindow, { passive: true });
+  window.addEventListener("resize", scheduleGridWindow, { passive: true });
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(scheduleGridWindow).observe(grid);
 
   updateSearchClear();
   syncAiToggle();
   syncAiSettingsStatus();
   syncAiUsageView();
   syncScrollState();
-  await hydrateLocalCacheMeta();
   await loadLogos();
 }
 
@@ -235,7 +269,7 @@ function restorePreferences() {
       10
     );
     if (Number.isFinite(storedDensity)) {
-      const clamped = Math.min(4, Math.max(1, storedDensity));
+      const clamped = Math.min(6, Math.max(1, storedDensity));
       densityRange.value = String(clamped);
     }
   }
@@ -249,6 +283,11 @@ function restorePreferences() {
   if (replaceToggle) {
     replaceToggle.checked = replaceSelectionEnabled;
   }
+  aiProvider = safeStorageGet(STORAGE_KEYS.aiProvider) === "codex" ? "codex" : "api";
+  document.getElementById("ai-provider").value = aiProvider;
+  document.getElementById("ai-codex-url").value = safeStorageGet(STORAGE_KEYS.codexUrl) || PictosAiProviders.DEFAULT_URL;
+  codexModel = safeStorageGet(STORAGE_KEYS.codexModel) || "";
+  try { document.getElementById("ai-codex-token").value = sessionStorage.getItem("logosPptCodexToken") || ""; } catch {}
   const storedAiEnabled = safeStorageGet(STORAGE_KEYS.aiEnabled);
   aiEnabled = storedAiEnabled === "1";
   aiApiKey = safeStorageGet(STORAGE_KEYS.aiApiKey) || "";
@@ -320,6 +359,7 @@ function safeStorageRemove(key) {
 
 function initSettingsPanel() {
   if (!settingsButton || !settingsPanel) return;
+  document.getElementById("settings-back").addEventListener("click", () => setSettingsPanelOpen(false));
   settingsButton.addEventListener("click", (event) => {
     event.stopPropagation();
     setSettingsPanelOpen(!settingsPanelOpen);
@@ -343,22 +383,119 @@ function initSettingsPanel() {
 
 function setSettingsPanelOpen(isOpen) {
   settingsPanelOpen = Boolean(isOpen);
+  document.querySelector(".search-dock").inert = settingsPanelOpen;
+  grid.inert = settingsPanelOpen;
+  document.body.classList.toggle("settings-open", settingsPanelOpen);
   if (settingsButton) {
     settingsButton.setAttribute("aria-expanded", settingsPanelOpen ? "true" : "false");
   }
   if (settingsPanel) {
     settingsPanel.classList.toggle("hidden", !settingsPanelOpen);
     settingsPanel.setAttribute("aria-hidden", settingsPanelOpen ? "false" : "true");
+    if (settingsPanelOpen) { settingsPanel.scrollTop = 0; document.getElementById("settings-back").focus(); }
+    else settingsButton?.focus();
+  }
+}
+
+function isAiProviderReady() {
+  return aiProvider === "codex" ? codexReady && Boolean(codexClient && codexModel) : Boolean(aiApiKey);
+}
+
+function providerWarning() {
+  return aiProvider === "codex" ? "Vérifiez la connexion au compagnon Codex dans Réglages." : AI_KEY_WARNING_MESSAGE;
+}
+
+function syncProviderPanels() {
+  const codex = aiProvider === "codex";
+  document.getElementById("ai-api-settings").classList.toggle("hidden", codex);
+  document.getElementById("ai-api-usage").classList.toggle("hidden", codex);
+  document.getElementById("ai-codex-settings").classList.toggle("hidden", !codex);
+}
+
+function initProviderControls() {
+  const providerSelect = document.getElementById("ai-provider");
+  const urlInput = document.getElementById("ai-codex-url");
+  const tokenInput = document.getElementById("ai-codex-token");
+  const modelSelect = document.getElementById("ai-codex-model");
+  providerSelect.addEventListener("change", () => {
+    clearAiSearchState();
+    aiProvider = providerSelect.value === "codex" ? "codex" : "api";
+    safeStorageSet(STORAGE_KEYS.aiProvider, aiProvider);
+    syncProviderPanels();
+    syncAiToggle();
+    syncAiSettingsStatus();
+    scheduleSearch({ immediate: true });
+  });
+  for (const input of [urlInput, tokenInput]) input.addEventListener("input", () => {
+    codexConnectionVersion++;
+    codexReady = false;
+    if (aiProvider === "codex") clearAiSearchState();
+    syncAiToggle();
+    syncAiSettingsStatus();
+  });
+  modelSelect.addEventListener("change", () => {
+    clearAiSearchState();
+    codexModel = modelSelect.value;
+    safeStorageSet(STORAGE_KEYS.codexModel, codexModel);
+    syncAiSettingsStatus();
+    scheduleSearch({ immediate: true });
+  });
+  document.getElementById("ai-codex-connect").addEventListener("click", checkCodexConnection);
+  document.getElementById("ai-codex-open").addEventListener("click", () => {
+    try {
+      const url = PictosAiProviders.localUrl(urlInput.value.trim());
+      const token = tokenInput.value.trim();
+      const fragment = /^[a-f0-9]{64}$/.test(token) ? `#${token}` : "";
+      window.open(`${url}/${fragment}`, "_blank", "noopener,noreferrer");
+    } catch (error) { syncAiSettingsStatus(error.message); }
+  });
+  syncProviderPanels();
+}
+
+async function checkCodexConnection() {
+  const button = document.getElementById("ai-codex-connect");
+  const version = ++codexConnectionVersion;
+  codexReady = false;
+  if (aiProvider === "codex") clearAiSearchState();
+  button.disabled = true;
+  syncAiSettingsStatus("Vérification du compagnon et du compte ChatGPT…");
+  try {
+    const url = document.getElementById("ai-codex-url").value.trim();
+    const token = document.getElementById("ai-codex-token").value.trim();
+    const client = new PictosAiProviders.CodexClient({ url, token });
+    const state = await client.status();
+    if (version !== codexConnectionVersion) return;
+    codexClient = client;
+    safeStorageSet(STORAGE_KEYS.codexUrl, client.url);
+    try { sessionStorage.setItem("logosPptCodexToken", token); } catch {}
+    document.getElementById("ai-codex-limits").textContent = PictosAiProviders.formatLimits(state.limits);
+    const select = document.getElementById("ai-codex-model");
+    select.replaceChildren();
+    for (const model of state.models || []) select.add(new Option(model.name || model.id, model.id));
+    codexModel = state.models?.find(m => m.id === codexModel)?.id || state.models?.find(m => /luna|mini|nano|spark/i.test(m.id))?.id || state.models?.find(m => m.isDefault)?.id || state.models?.[0]?.id || "";
+    select.value = codexModel;
+    safeStorageSet(STORAGE_KEYS.codexModel, codexModel);
+    codexReady = Boolean(state.connected && codexModel);
+    syncAiSettingsStatus(codexReady ? `Codex connecté${state.account?.email ? ` : ${state.account.email}` : ""}. Activez le bouton AI pour rechercher.` : "Compagnon accessible. Ouvrez-le pour connecter ChatGPT, puis vérifiez à nouveau.");
+    clearAiStatusWarningIfConfigured();
+    if (aiProvider === "codex") scheduleSearch({ immediate: true });
+  } catch (error) {
+    if (version === codexConnectionVersion) syncAiSettingsStatus(error.message);
+  } finally {
+    button.disabled = false;
+    syncAiToggle();
   }
 }
 
 function initAiControls() {
+  initProviderControls();
   if (aiToggle) {
     aiToggle.addEventListener("click", handleAiToggle);
   }
   if (aiApiSave) {
     aiApiSave.addEventListener("click", () => {
       const nextValue = aiApiKeyInput ? aiApiKeyInput.value.trim() : "";
+      if (aiProvider === "api") clearAiSearchState();
       aiApiKey = nextValue;
       persistAiApiKey();
       syncAiSettingsStatus(aiApiKey ? "Clé API enregistrée localement." : "Clé supprimée.");
@@ -374,8 +511,8 @@ function initAiControls() {
         aiApiKeyInput.value = "";
       }
       persistAiApiKey();
-      clearAiSearchState({ keepCache: false });
-      syncAiSettingsStatus("Clé supprimée. Le mode IA ne peut plus appeler OpenAI.");
+      if (aiProvider === "api") clearAiSearchState({ keepCache: false });
+      syncAiSettingsStatus("Clé API supprimée.");
       syncAiToggle();
       requestRender();
     });
@@ -398,13 +535,13 @@ function initAiControls() {
 
 function handleAiToggle() {
   const nextState = !aiEnabled;
-  if (nextState && !aiApiKey) {
+  if (nextState && !isAiProviderReady()) {
     aiEnabled = false;
     persistAiEnabled();
     syncAiToggle();
-    syncAiSettingsStatus("Ajoutez une clé API OpenAI avant d'activer le mode AI.");
+    syncAiSettingsStatus(providerWarning());
     setSettingsPanelOpen(true);
-    setStatus(AI_KEY_WARNING_MESSAGE, "error");
+    setStatus(providerWarning(), "error");
     return;
   }
   aiEnabled = nextState;
@@ -422,7 +559,7 @@ function syncAiToggle() {
   if (!aiToggle) return;
   aiToggle.classList.toggle("is-active", aiEnabled);
   aiToggle.classList.toggle("is-loading", aiSearchState.loading);
-  aiToggle.classList.toggle("is-disabled", aiEnabled && !aiApiKey);
+  aiToggle.classList.toggle("is-disabled", aiEnabled && !isAiProviderReady());
   aiToggle.setAttribute("aria-pressed", aiEnabled ? "true" : "false");
   aiToggle.setAttribute(
     "aria-label",
@@ -435,6 +572,10 @@ function syncAiSettingsStatus(message = "") {
   if (!aiSettingsStatus) return;
   if (message) {
     aiSettingsStatus.textContent = message;
+    return;
+  }
+  if (aiProvider === "codex") {
+    aiSettingsStatus.textContent = codexReady ? `Codex prêt · ${codexModel}. Activez le bouton AI pour rechercher.` : "Vérifiez la connexion au compagnon pour activer Codex.";
     return;
   }
   if (!aiApiKey) {
@@ -461,6 +602,9 @@ function syncScrollState() {
 }
 
 function clearAiSearchState(options = {}) {
+  aiRequestController?.abort();
+  aiRequestController = null;
+  aiPending = null;
   const { keepCache = true } = options;
   aiSearchState = {
     query: "",
@@ -584,8 +728,8 @@ function recordAiUsage(usage) {
 }
 
 function clearAiStatusWarningIfConfigured() {
-  if (!aiApiKey || !statusEl) return;
-  if (statusEl.textContent === AI_KEY_WARNING_MESSAGE) {
+  if (!isAiProviderReady() || !statusEl) return;
+  if ([AI_KEY_WARNING_MESSAGE, "Vérifiez la connexion au compagnon Codex dans Réglages."].includes(statusEl.textContent)) {
     setStatus("");
   }
 }
@@ -686,6 +830,7 @@ function scheduleSearch(options = {}) {
     return;
   }
   const query = getNormalizedSearchQuery();
+  if (aiSearchState.loading && aiSearchState.query !== query) clearAiSearchState();
   const delay = shouldUseAiSearch(query) ? AI_SEARCH_DEBOUNCE_MS : SEARCH_DEBOUNCE_MS;
   searchTimer = setTimeout(() => {
     searchTimer = null;
@@ -719,7 +864,7 @@ function getNormalizedSearchQuery() {
 }
 
 function shouldUseAiSearch(query) {
-  return Boolean(aiEnabled && query && query.length >= 2);
+  return Boolean(aiEnabled && isAiProviderReady() && query && query.length >= 2);
 }
 
 function getRenderableLogos() {
@@ -754,16 +899,27 @@ function handleGridClick(event) {
 }
 
 function handleGridKeydown(event) {
-  if (event.key !== "Enter" && event.key !== " ") return;
   if (event.target.closest(".favorite-toggle")) return;
   const card = event.target.closest(".logo-card");
   if (!card || !grid.contains(card)) return;
-  event.preventDefault();
-  const logoId = Number(card.dataset.logoId);
-  const logo = logoById.get(logoId);
-  if (logo) {
-    insertLogo(logo);
+  const index = Number(card.dataset.index);
+  const steps = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: gridColumns, ArrowUp: -gridColumns };
+  if (event.key in steps || event.key === "Home" || event.key === "End") {
+    event.preventDefault();
+    const next = event.key === "Home" ? 0 : event.key === "End" ? displayedLogos.length - 1
+      : Math.min(displayedLogos.length - 1, Math.max(0, index + steps[event.key]));
+    const rect = grid.getBoundingClientRect();
+    const layout = PictosGrid.layout({ count: displayedLogos.length, columns: gridColumns, width: rect.width, top: -rect.top, viewport: window.innerHeight });
+    const y = rect.top + Math.floor(next / gridColumns) * layout.stride;
+    if (y < 0 || y + layout.size > window.innerHeight - 160) window.scrollTo({ top: window.scrollY + y - 40, behavior: "instant" });
+    renderGridWindow();
+    grid.querySelector(`[data-index="${next}"]`)?.focus({ preventScroll: true });
+    return;
   }
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  const logo = logoById.get(Number(card.dataset.logoId));
+  if (logo) insertLogo(logo);
 }
 
 function initZipDropzone() {
@@ -839,113 +995,79 @@ function setZipSummaryVisible(hasMeta) {
   zipSummary.classList.toggle("hidden", !hasMeta);
 }
 
-async function hydrateLocalCacheMeta() {
-  const record = await readZipCache();
-  if (record && record.meta) {
-    localZipRecord = { meta: record.meta };
-    updateZipMeta(record.meta);
-  }
-}
-
-async function getZipRecordWithBuffer() {
-  if (localZipRecord && localZipRecord.buffer) {
-    return localZipRecord;
-  }
-  return await readZipCache();
-}
-
 async function loadLogos(options = {}) {
-  const { force = false } = options;
-  if (force) {
-    keywordsPromise = null;
-    wordnetPromise = null;
-  }
-  await loadLocalLogos({ force });
-}
-
-async function loadLocalLogos(options = {}) {
-  const { force = false } = options;
+  if (libraryBusy) return;
+  libraryBusy = true;
+  refreshBtn.disabled = true;
+  if (options.force) { keywordsPromise = null; wordnetPromise = null; }
   setStatus("Chargement des logos locaux…");
   try {
-    if (!localLogosCache || force) {
-      clearLogoCaches();
-      resetZipSession();
-      const record = await getZipRecordWithBuffer();
-      if (!record || !record.buffer) {
-        renderEmptyState("Aucun ZIP local chargé. Glissez un fichier .zip pour commencer.");
-        setStatus("Aucun ZIP local disponible.", "error");
+    if (!localLogosCache) {
+      const record = localZipRecord?.buffer ? localZipRecord : await readZipCache();
+      if (!record?.buffer) {
+        renderEmptyState("Aucun ZIP local chargé. Ouvrez les réglages pour importer votre bibliothèque.");
+        setStatus("");
         return;
       }
-      localZipRecord = record;
       const parsed = await loadZipBuffer(record.buffer);
+      clearLogoCaches();
       localLogosCache = parsed.items;
-      const meta = buildZipMeta(record, localLogosCache.length);
-      localZipRecord = { meta };
-      updateZipMeta(meta);
-      if (record.buffer) {
-        await saveZipCache(record.buffer, meta);
-      }
+      localZipRecord = { meta: buildZipMeta(record, parsed.items.length) };
+      updateZipMeta(localZipRecord.meta);
     }
-    const map = await getKeywordsMap();
-    keywordsMap = map;
-    wordnetMap = await getWordnetMap();
-    allLogos = attachKeywords(localLogosCache, keywordsMap);
-    buildSearchIndex(allLogos);
-    clearAiSearchState();
-    requestRender();
-    if (shouldUseAiSearch(getNormalizedSearchQuery())) {
-      void requestAiSearch(getNormalizedSearchQuery());
-    }
-    setStatus(allLogos.length ? "" : "Aucun logo SVG trouvé dans le ZIP local.");
+    await prepareLibrary();
   } catch (error) {
     console.error(error);
-    renderEmptyState("Impossible de charger les logos locaux.");
-    setStatus("Impossible de charger les logos locaux.", "error");
-  }
+    setStatus("Impossible de charger la bibliothèque. Réessayez ou importez votre ZIP dans les réglages.", "error");
+  } finally { libraryBusy = false; refreshBtn.disabled = false; }
+}
+
+async function prepareLibrary() {
+  // Show filenames immediately; dictionary downloads must not delay the first preview.
+  allLogos = attachKeywords(localLogosCache, keywordsMap);
+  buildSearchIndex(allLogos);
+  clearSearchCache();
+  clearAiSearchState();
+  requestRender();
+  setStatus("");
+  const [map, synonyms] = await Promise.all([getKeywordsMap(), getWordnetMap()]);
+  keywordsMap = map;
+  wordnetMap = synonyms;
+  allLogos = attachKeywords(localLogosCache, keywordsMap);
+  buildSearchIndex(allLogos);
+  clearSearchCache();
+  requestRender();
 }
 
 async function handleZipFile(file) {
+  if (libraryBusy) { setStatus("Un chargement est déjà en cours."); return; }
   if (!file || !/\.zip$/i.test(file.name)) {
-    setStatus("Merci de sélectionner un fichier .zip contenant des SVG.", "error");
-    return;
+    setStatus("Merci de sélectionner un fichier .zip contenant des SVG.", "error"); return;
   }
-  if (typeof JSZip === "undefined" && typeof Worker === "undefined") {
-    setStatus("JSZip n'est pas chargé. Vérifiez la connexion réseau.", "error");
-    return;
-  }
-
-  setStatus(`Import du ZIP "${file.name}"…`);
-
+  libraryBusy = true;
+  refreshBtn.disabled = true;
+  let candidate;
+  setStatus(`Import du ZIP « ${file.name} »…`);
   try {
     const buffer = await file.arrayBuffer();
-    const previewSession = createMainZipSession();
-    const parsed = await previewSession.load(buffer);
-    previewSession.reset();
-    if (!parsed.items.length) {
-      setStatus("Aucun SVG trouvé dans le ZIP.", "error");
-      return;
-    }
-    clearLogoCaches();
+    candidate = createZipSession();
+    const parsed = await candidate.load(buffer);
+    if (!parsed.items.length) throw new Error("Aucun SVG trouvé dans le ZIP.");
+    // Only replace the active archive once the candidate has been read successfully.
     resetZipSession({ terminate: true });
-    await loadZipBuffer(buffer);
-    const meta = {
-      name: file.name,
-      size: file.size,
-      count: parsed.items.length,
-      updatedAt: Date.now()
-    };
-    localZipRecord = { meta, buffer };
+    zipSession = candidate; candidate = null;
+    clearLogoCaches();
+    localLogosCache = parsed.items;
+    const meta = { name: file.name, size: file.size, count: parsed.items.length, updatedAt: Date.now() };
+    localZipRecord = { meta };
     updateZipMeta(meta);
-    await saveZipCache(buffer, meta);
-
-    await loadLocalLogos();
-
-    const note = buildZipStatsMessage(parsed.stats);
-    setStatus(note, "success");
+    const saved = saveZipCache(buffer, meta);
+    await prepareLibrary();
+    if (await saved) setStatus(buildZipStatsMessage(parsed.stats), "success");
+    else setStatus("Bibliothèque chargée pour cette session. Le stockage local est indisponible : réimportez le ZIP à la prochaine ouverture.", "error");
   } catch (error) {
-    console.error(error);
-    setStatus("Erreur lors de l'import du ZIP.", "error");
-  }
+    setStatus(`Import impossible : ${error.message || error}`, "error");
+  } finally { candidate?.terminate?.(); libraryBusy = false; refreshBtn.disabled = false; if (zipInput) zipInput.value = ""; }
 }
 
 function normalizeSynonymList(list) {
@@ -977,11 +1099,11 @@ function depluralizeToken(token) {
 function getSynonymsForToken(token) {
   if (!token || !wordnetMap || wordnetMap.size === 0) return [];
   const direct = wordnetMap.get(token);
-  if (direct && direct.length) return direct;
+  if (direct && direct.length) return normalizeSynonymList(direct);
   const singular = depluralizeToken(token);
   if (singular && singular !== token) {
     const fallback = wordnetMap.get(singular);
-    if (fallback && fallback.length) return fallback;
+    if (fallback && fallback.length) return normalizeSynonymList(fallback);
   }
   return [];
 }
@@ -1098,7 +1220,7 @@ function filterLogos() {
 
   let sorted = [];
   if (queryTokens.length) {
-    sorted = filtered.slice();
+    sorted = filtered.map(logo => ({ ...logo }));
     for (const logo of sorted) {
       logo.relevanceScore = scoreLogo(logo, queryTokens, groups);
     }
@@ -1108,7 +1230,7 @@ function filterLogos() {
       return compareBySortMode(a, b);
     });
   } else {
-    sorted = sortLogos(filtered);
+    sorted = sortLogos(filtered).map(logo => ({ ...logo }));
     for (const logo of sorted) {
       logo.relevanceScore = 0;
     }
@@ -1139,13 +1261,25 @@ function sortLogos(logos) {
   return list;
 }
 
-async function requestAiSearch(query) {
-  if (!query || !aiEnabled || !aiApiKey || !allLogos.length) {
+function requestAiSearch(query) {
+  const key = buildAiSearchCacheKey(query);
+  if (aiPending?.key === key && !aiRequestController?.signal.aborted) return aiPending.promise;
+  const promise = performAiSearch(query);
+  aiPending = { key, promise };
+  promise.finally(() => { if (aiPending?.promise === promise) aiPending = null; });
+  return promise;
+}
+
+async function performAiSearch(query) {
+  if (!query || !aiEnabled || !isAiProviderReady() || !allLogos.length) {
     return;
   }
+  aiRequestController?.abort();
+  aiRequestController = new AbortController();
+  const context = { provider: aiProvider, model: codexModel, client: codexClient, apiKey: aiApiKey, signal: aiRequestController.signal };
   const cacheKey = buildAiSearchCacheKey(query);
   const cached = aiSearchCache.get(cacheKey);
-  if (cached && Array.isArray(cached.resultIds) && cached.resultIds.length) {
+  if (cached && Array.isArray(cached.resultIds)) {
     aiSearchState = {
       query,
       resultIds: cached.resultIds,
@@ -1174,12 +1308,12 @@ async function requestAiSearch(query) {
     const expansion =
       allLogos.length <= AI_FULL_SCAN_LIMIT
         ? createFallbackAiExpansion(query)
-        : await expandQueryWithAi(query);
+        : await expandQueryWithAi(query, context);
     if (requestId !== aiSearchState.requestId) {
       return;
     }
     const candidates = collectAiCandidates(query, expansion);
-    const ranking = await rankAiCandidates(query, expansion, candidates);
+    const ranking = await rankAiCandidates(query, expansion, candidates, context);
     if (requestId !== aiSearchState.requestId) {
       return;
     }
@@ -1198,10 +1332,11 @@ async function requestAiSearch(query) {
       source: "ai"
     };
     saveAiCacheEntry(cacheKey, { resultIds, source: "ai" });
+    setStatus("");
     syncAiSettingsStatus(
       resultIds.length
-        ? `Mode AI actif sur ${AI_MODEL}. ${resultIds.length} résultat${resultIds.length > 1 ? "s" : ""} reranké${resultIds.length > 1 ? "s" : ""}.`
-        : `Mode AI actif sur ${AI_MODEL}, sans résultat exploitable pour cette requête.`
+        ? `Mode AI actif sur ${context.provider === "codex" ? context.model : AI_MODEL}. ${resultIds.length} résultat${resultIds.length > 1 ? "s" : ""} reranké${resultIds.length > 1 ? "s" : ""}.`
+        : `Mode AI actif sur ${context.provider === "codex" ? context.model : AI_MODEL}, sans résultat exploitable pour cette requête.`
     );
     syncAiToggle();
     requestRender();
@@ -1217,9 +1352,9 @@ async function requestAiSearch(query) {
       requestId,
       source: "error"
     };
-    syncAiSettingsStatus(
-      `Erreur AI : ${aiSearchState.error}. La recherche locale reste disponible.`
-    );
+    const message = `Erreur IA : ${aiSearchState.error}. La recherche locale reste disponible.`;
+    syncAiSettingsStatus(message);
+    setStatus(message, "error");
     syncAiToggle();
     requestRender();
   }
@@ -1235,46 +1370,8 @@ function createFallbackAiExpansion(query) {
   };
 }
 
-async function expandQueryWithAi(query) {
-  const schema = {
-    type: "object",
-    additionalProperties: false,
-    required: [
-      "core_concepts",
-      "visual_metaphors",
-      "concrete_objects",
-      "related_keywords"
-    ],
-    properties: {
-      core_concepts: {
-        type: "array",
-        items: { type: "string" },
-        maxItems: 6
-      },
-      visual_metaphors: {
-        type: "array",
-        items: { type: "string" },
-        maxItems: 6
-      },
-      concrete_objects: {
-        type: "array",
-        items: { type: "string" },
-        maxItems: 6
-      },
-      related_keywords: {
-        type: "array",
-        items: { type: "string" },
-        maxItems: 8
-      }
-    }
-  };
-  const { parsed } = await callOpenAiJson({
-    schemaName: "pictogram_query_expansion",
-    schema,
-    systemPrompt:
-      "You are a compact multilingual query-expansion engine for pictogram search in presentation software. Translate abstract ideas into short visualizable concepts and concrete icon labels. Return only lowercase short phrases with no explanations.",
-    userPrompt: `Query: ${query}`
-  });
+async function expandQueryWithAi(query, context) {
+  const { parsed } = await callAiJson({ task: "expand", query }, context);
   return {
     coreConcepts: normalizeAiTerms(parsed.core_concepts),
     visualMetaphors: normalizeAiTerms(parsed.visual_metaphors),
@@ -1296,14 +1393,16 @@ function collectAiCandidates(query, expansion) {
     { terms: expansion.relatedKeywords, weight: 56 }
   ];
 
+  const phrases = buckets.flatMap(bucket => (bucket.terms || []).map(term => {
+    const normalized = normalizeSearchText(term);
+    return { normalized, tokens: tokenizeSearchText(normalized), weight: bucket.weight };
+  }));
   const scored = [];
   for (const logo of allLogos) {
     const text = logo.searchText || "";
     let score = 0;
-    for (const bucket of buckets) {
-      for (const term of bucket.terms || []) {
-        score += bucket.weight * scoreAiPhraseMatch(text, term);
-      }
+    for (const phrase of phrases) {
+      score += phrase.weight * scorePreparedAiPhraseMatch(text, phrase.normalized, phrase.tokens);
     }
     if (score <= 0) continue;
     if (logo.isFavorite) score += 6;
@@ -1328,7 +1427,11 @@ function scoreAiPhraseMatch(searchText, phrase) {
   const normalized = normalizeSearchText(phrase);
   if (!normalized || !searchText) return 0;
   const tokens = tokenizeSearchText(normalized);
-  if (!tokens.length) return 0;
+  return scorePreparedAiPhraseMatch(searchText, normalized, tokens);
+}
+
+function scorePreparedAiPhraseMatch(searchText, normalized, tokens) {
+  if (!tokens.length || !searchText) return 0;
   let matched = 0;
   for (const token of tokens) {
     if (searchText.includes(token)) {
@@ -1341,102 +1444,28 @@ function scoreAiPhraseMatch(searchText, phrase) {
   return ratio + phraseBonus;
 }
 
-async function rankAiCandidates(query, expansion, candidates) {
-  if (!candidates.length) {
-    return { orderedIds: [] };
-  }
-  if (candidates.length === 1) {
-    return { orderedIds: [candidates[0].id] };
-  }
-
-  const schema = {
-    type: "object",
-    additionalProperties: false,
-    required: ["ordered_ids", "note"],
-    properties: {
-      ordered_ids: {
-        type: "array",
-        items: { type: "integer" },
-        maxItems: AI_RESULT_LIMIT
-      },
-      note: {
-        type: "string"
-      }
-    }
+async function rankAiCandidates(query, expansion, candidates, context) {
+  if (!candidates.length) return { orderedIds: [] };
+  if (candidates.length === 1) return { orderedIds: [candidates[0].id] };
+  const input = {
+    task: "rank", query, expansion,
+    candidates: candidates.map(logo => ({ id: logo.id, label: stripSvgExtension(logo.name).slice(0, 300), keywords: Array.isArray(logo.keywords) ? logo.keywords.slice(0, 5).map(k => String(k).slice(0, 100)) : [] }))
   };
-
-  const lines = candidates.map((logo) => {
-    const label = stripSvgExtension(logo.name);
-    const keywords = Array.isArray(logo.keywords) ? logo.keywords.slice(0, 5).join(", ") : "";
-    return `${logo.id} | ${label}${keywords ? ` | ${keywords}` : ""}`;
-  });
-
-  const { parsed } = await callOpenAiJson({
-    schemaName: "pictogram_candidate_ranking",
-    schema,
-    systemPrompt:
-      "You rank pictogram candidates for presentation slides. Prefer icons a human would actually use to communicate the query on one slide. Reward direct matches first, then strong metaphors, then concrete substitutes. Avoid duplicates and generic noise. Return only JSON.",
-    userPrompt: [
-      `Query: ${query}`,
-      `Expanded concepts: ${(expansion.coreConcepts || []).join(", ") || "-"}`,
-      `Visual metaphors: ${(expansion.visualMetaphors || []).join(", ") || "-"}`,
-      `Concrete objects: ${(expansion.concreteObjects || []).join(", ") || "-"}`,
-      `Related keywords: ${(expansion.relatedKeywords || []).join(", ") || "-"}`,
-      "Candidates:",
-      lines.join("\n")
-    ].join("\n")
-  });
-
-  return {
-    orderedIds: Array.isArray(parsed.ordered_ids) ? parsed.ordered_ids : [],
-    note: parsed.note || ""
-  };
+  const { parsed } = await callAiJson(input, context);
+  return { orderedIds: parsed.ordered_ids, note: parsed.note || "" };
 }
 
-async function callOpenAiJson(options) {
-  const { schemaName, schema, systemPrompt, userPrompt } = options;
-  const response = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${aiApiKey}`
-    },
-    body: JSON.stringify({
-      model: AI_MODEL,
-      temperature: 0.2,
-      store: false,
-      user: getOrCreateAiAnonId(),
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: schemaName,
-          strict: true,
-          schema
-        }
-      },
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt }
-      ]
-    })
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`OpenAI ${response.status}: ${errorText}`);
+async function callAiJson(input, context) {
+  const task = PictosAiTasks.build(input);
+  let result;
+  if (context.provider === "codex") {
+    result = await context.client.search(input, context.model, context.signal);
+  } else {
+    result = await PictosAiProviders.apiJson({ task, model: AI_MODEL, key: context.apiKey, user: getOrCreateAiAnonId(), signal: context.signal });
+    recordAiUsage(result.usage);
   }
-
-  const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) {
-    throw new Error("Réponse IA vide.");
-  }
-  const parsed = JSON.parse(content);
-  recordAiUsage(data?.usage);
-  return {
-    parsed,
-    usage: data?.usage || null
-  };
+  PictosAiTasks.validate(input, result.parsed);
+  return result;
 }
 
 function normalizeAiTerms(list) {
@@ -1453,7 +1482,7 @@ function normalizeAiTerms(list) {
 }
 
 function buildAiSearchCacheKey(query) {
-  return `${AI_MODEL}|${getZipFingerprint()}|${query}`;
+  return `${PictosAiTasks.VERSION}|${aiProvider}|${aiProvider === "codex" ? codexModel : AI_MODEL}|${getZipFingerprint()}|${query}`;
 }
 
 function getOrCreateAiAnonId() {
@@ -1491,10 +1520,11 @@ function resolveAiResultIds(ids) {
 }
 
 function completeAiResultIds(ids, candidates) {
+  const allowedIds = new Set(candidates.map(logo => logo.id));
   const seen = new Set();
   const output = [];
   for (const id of ids) {
-    if (!Number.isFinite(id) || seen.has(id)) continue;
+    if (!Number.isFinite(id) || seen.has(id) || !allowedIds.has(id)) continue;
     const logo = logoById.get(id);
     if (!logo) continue;
     seen.add(id);
@@ -1637,8 +1667,10 @@ function clearSearchCache() {
 }
 
 function renderEmptyState(message) {
+  displayedLogos = [];
   resetLazyObserver();
   grid.replaceChildren();
+  grid.style.height = "auto";
   updateLogoCount(0);
   const empty = document.createElement("div");
   empty.className = "status";
@@ -1647,40 +1679,53 @@ function renderEmptyState(message) {
 }
 
 function renderLogos(logos) {
-  renderToken += 1;
-  const token = renderToken;
-  resetLazyObserver();
-
-  if (!logos.length) {
-    renderEmptyState("Aucun résultat pour cette recherche.");
-    return;
+  const searchKey = `${libraryGeneration}|${getNormalizedSearchQuery()}|${keywordFilterState}|${sortMode}|${aiSearchState.source}`;
+  if (searchKey !== displayedSearchKey) {
+    displayedSearchKey = searchKey;
+    window.scrollTo({ top: 0, behavior: "instant" });
   }
-
+  resetLazyObserver();
   grid.replaceChildren();
+  displayedLogos = logos;
+  displayedMaxScore = logos.reduce((max, logo) => Math.max(max, logo.relevanceScore || 0), 0);
   updateLogoCount(logos.length);
+  if (!logos.length) { renderEmptyState("Aucun résultat pour cette recherche."); return; }
+  renderGridWindow();
+}
 
-  const maxScore = logos.reduce(
-    (max, logo) => Math.max(max, logo.relevanceScore || 0),
-    0
-  );
+function scheduleGridWindow() {
+  if (gridWindowFrame !== null) return;
+  gridWindowFrame = requestAnimationFrame(() => { gridWindowFrame = null; renderGridWindow(); });
+}
 
-  let index = 0;
-  const total = logos.length;
-
-  const renderChunk = () => {
-    if (token !== renderToken) return;
-    const fragment = document.createDocumentFragment();
-    const end = Math.min(index + RENDER_BATCH_SIZE, total);
-    for (; index < end; index += 1) {
-      fragment.appendChild(createLogoCard(logos[index], index, maxScore));
-    }
-    grid.appendChild(fragment);
-    if (index < total) {
-      requestAnimationFrame(renderChunk);
-    }
-  };
-
-  renderChunk();
+function renderGridWindow() {
+  if (!displayedLogos.length) return;
+  const rect = grid.getBoundingClientRect();
+  if (!rect.width) return;
+  const layout = PictosGrid.layout({ count: displayedLogos.length, columns: gridColumns,
+    width: rect.width, top: -rect.top, viewport: window.innerHeight });
+  grid.style.height = `${layout.height}px`;
+  const wanted = new Set();
+  for (let index = layout.start; index < layout.end; index++) wanted.add(index);
+  // Retain a focused card while scrolling so keyboard focus never vanishes.
+  const focused = document.activeElement?.closest?.(".logo-card");
+  if (focused && grid.contains(focused)) wanted.add(Number(focused.dataset.index));
+  const existing = new Map();
+  for (const card of Array.from(grid.children)) {
+    const index = Number(card.dataset.index);
+    if (!wanted.has(index)) { const img = card.querySelector("img"); if (img) lazyObserver?.unobserve(img); card.remove(); }
+    else existing.set(index, card);
+  }
+  for (const index of wanted) {
+    if (!displayedLogos[index]) continue;
+    let card = existing.get(index);
+    if (!card) { card = createLogoCard(displayedLogos[index], index, displayedMaxScore); grid.appendChild(card); }
+    card.style.width = `${layout.size}px`;
+    card.style.height = `${layout.size}px`;
+    card.style.left = `${(index % layout.columns) * layout.stride}px`;
+    card.style.top = `${Math.floor(index / layout.columns) * layout.stride}px`;
+  }
+  trimPreviewCache();
 }
 
 function createLogoCard(logo, index, maxScore) {
@@ -1692,7 +1737,8 @@ function createLogoCard(logo, index, maxScore) {
   card.setAttribute("role", "button");
   card.setAttribute("tabindex", "0");
   card.setAttribute("aria-label", `Insérer ${logo.displayName || logo.name}`);
-  card.style.animationDelay = `${index * 20}ms`;
+  card.dataset.index = String(index);
+  card.title = logo.displayName || logo.name;
   card.dataset.logoId = String(logo.id ?? index);
   const score = Number(logo.relevanceScore) || 0;
   const normalized = maxScore > 0 ? Math.min(1, score / maxScore) : 0;
@@ -1724,8 +1770,8 @@ function createLogoCard(logo, index, maxScore) {
   img.loading = "lazy";
   img.decoding = "async";
   img.alt = logo.name;
-  if (logo.url) {
-    img.src = logo.url;
+  if (previewCache.get(logo.id)?.url) {
+    img.src = previewCache.get(logo.id).url;
   } else {
     img.src = TRANSPARENT_PIXEL;
     img.dataset.logoId = String(logo.id ?? index);
@@ -1794,6 +1840,7 @@ function loadLogoPreview(img) {
       if (img.isConnected) {
         img.removeAttribute("data-loading");
       }
+      trimPreviewCache();
     });
 }
 
@@ -1831,6 +1878,8 @@ function recordRecent(logo) {
   const usedAt = Date.now();
   recentMap.set(getLogoStorageKey(logo), usedAt);
   logo.lastUsedAt = usedAt;
+  const canonical = logoById.get(logo.id);
+  if (canonical) canonical.lastUsedAt = usedAt;
   persistRecents();
   clearSearchCache();
   if (sortMode === "recent") {
@@ -1838,38 +1887,47 @@ function recordRecent(logo) {
   }
 }
 
-async function ensureLogoUrl(logo) {
-  if (logo.url) return logo.url;
-  if (logo.urlPromise) return logo.urlPromise;
-  logo.urlPromise = (async () => {
-    const svgText = await getSvgText(logo);
-    const url = createSvgUrl(svgText);
-    logo.url = url;
-    return url;
-  })();
-  try {
-    return await logo.urlPromise;
-  } finally {
-    logo.urlPromise = null;
+function cachedPreview(logo) {
+  let entry = previewCache.get(logo.id);
+  if (entry) previewCache.delete(logo.id);
+  else entry = { bytes: 0, text: null, url: null, promise: null };
+  previewCache.set(logo.id, entry);
+  return entry;
+}
+
+function trimPreviewCache() {
+  const pinned = new Set(Array.from(grid.children, card => Number(card.dataset.logoId)));
+  for (const [id, entry] of previewCache) {
+    if (previewCache.size <= PREVIEW_CACHE_LIMIT && previewCacheBytes <= PREVIEW_CACHE_BYTES) break;
+    if (pinned.has(id) || entry.promise) continue;
+    if (entry.url) { URL.revokeObjectURL(entry.url); localObjectUrls.delete(entry.url); }
+    previewCacheBytes -= entry.bytes;
+    previewCache.delete(id);
   }
 }
 
+async function ensureLogoUrl(logo) {
+  const generation = libraryGeneration;
+  const text = await getSvgText(logo);
+  if (generation !== libraryGeneration) throw new Error("Bibliothèque remplacée.");
+  const entry = cachedPreview(logo);
+  if (!entry.url) entry.url = createSvgUrl(text);
+  return entry.url;
+}
+
 async function getSvgText(logo) {
-  if (logo.svgText) return logo.svgText;
-  if (logo.svgPromise) return logo.svgPromise;
-  const entryName = logo.entryName || logo.name;
-  if (!entryName) {
-    throw new Error("SVG introuvable en local.");
-  }
-  logo.svgPromise = fetchSvgTextFromZip(entryName).then((text) => {
-    logo.svgText = text;
+  const entry = cachedPreview(logo);
+  if (entry.text) return entry.text;
+  if (entry.promise) return entry.promise;
+  const generation = libraryGeneration;
+  entry.promise = fetchSvgTextFromZip(logo.entryName || logo.name).then(text => {
+    if (generation !== libraryGeneration) throw new Error("Bibliothèque remplacée.");
+    entry.text = text;
+    entry.bytes = text.length * 2;
+    previewCacheBytes += entry.bytes;
     return text;
-  });
-  try {
-    return await logo.svgPromise;
-  } finally {
-    logo.svgPromise = null;
-  }
+  }).finally(() => { entry.promise = null; });
+  return entry.promise;
 }
 
 async function fetchSvgTextFromZip(name) {
@@ -1885,10 +1943,8 @@ async function fetchSvgTextFromZip(name) {
 }
 
 async function getPreparedSvg(logo) {
-  if (logo.normalizedSvg) return logo.normalizedSvg;
   const svgText = await getSvgText(logo);
   const normalized = normalizeSvg(svgText);
-  logo.normalizedSvg = normalized;
   return normalized;
 }
 
@@ -2137,7 +2193,7 @@ async function getSelectedSlideId() {
     const slides = context.presentation.getSelectedSlides();
     slides.load("items");
     await context.sync();
-    const slide = slides.items[0];
+    const slide = slides.items.length === 1 ? slides.items[0] : null;
     if (!slide) {
       return;
     }
@@ -2151,11 +2207,11 @@ async function getSelectedSlideId() {
 }
 
 function goToSlide(slideId) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     Office.context.document.goToByIdAsync(
       slideId,
       Office.GoToType.Slide,
-      () => resolve()
+      result => result.status === Office.AsyncResultStatus.Succeeded ? resolve() : reject(result.error)
     );
   });
 }
@@ -2176,7 +2232,7 @@ function getWordnetMap() {
 
 async function fetchKeywords() {
   try {
-    const response = await fetch("keywords.json", { cache: "force-cache" });
+    const response = await fetch("keywords.json", { cache: "force-cache", signal: AbortSignal.timeout(12000) });
     if (!response.ok) {
       return new Map();
     }
@@ -2196,7 +2252,7 @@ async function fetchKeywords() {
 
 async function fetchWordnetSynonyms() {
   try {
-    const response = await fetch(WORDNET_SYNONYMS_URL, { cache: "force-cache" });
+    const response = await fetch(WORDNET_SYNONYMS_URL, { cache: "force-cache", signal: AbortSignal.timeout(12000) });
     if (!response.ok) {
       return new Map();
     }
@@ -2209,15 +2265,17 @@ async function fetchWordnetSynonyms() {
         const term = normalizeSearchText(item.term || item.word || "");
         const synonyms = Array.isArray(item.synonyms) ? item.synonyms : [];
         if (term && synonyms.length) {
-          map.set(term, normalizeSynonymList(synonyms));
+          map.set(term, synonyms);
         }
       }
     } else if (items && typeof items === "object") {
+      let processed = 0;
       for (const [term, synonyms] of Object.entries(items)) {
+        if (++processed % 1024 === 0) await new Promise(resolve => setTimeout(resolve, 0));
         if (!Array.isArray(synonyms) || !synonyms.length) continue;
         const normalized = normalizeSearchText(term);
         if (!normalized) continue;
-        map.set(normalized, normalizeSynonymList(synonyms));
+        map.set(normalized, synonyms);
       }
     }
     return map;
@@ -2254,7 +2312,10 @@ function syncKeywordToggle() {
 
 function updateGridColumns(columns) {
   if (!grid || !columns) return;
-  const value = Math.min(4, Math.max(1, Number(columns)));
+  const value = Math.min(6, Math.max(1, Math.round(Number(columns)) || 3));
+  gridColumns = value;
+  grid.dataset.columns = String(value);
+  scheduleGridWindow();
   grid.style.setProperty("--grid-columns", value);
   if (densityValue) {
     densityValue.textContent = String(value);
@@ -2276,6 +2337,9 @@ function revokeLocalUrls() {
 }
 
 function clearLogoCaches() {
+  libraryGeneration += 1;
+  previewCache.clear();
+  previewCacheBytes = 0;
   revokeLocalUrls();
   clearSearchCache();
   clearAiSearchState();
@@ -2287,73 +2351,69 @@ function clearLogoCaches() {
 
 async function loadZipBuffer(buffer) {
   const session = getZipSession();
-  if (!session) {
-    throw new Error("Impossible d'initialiser le lecteur ZIP.");
-  }
-  const useWorker = session.type === "worker";
-  const payload = useWorker ? buffer.slice(0) : buffer;
-  try {
-    return await session.load(payload);
-  } catch (error) {
-    if (useWorker) {
-      console.warn("ZIP worker indisponible, repli sur le thread principal.", error);
-      resetZipSession({ terminate: true });
-      zipSession = createMainZipSession();
-      return await zipSession.load(buffer);
-    }
-    throw error;
-  }
+  return session.load(buffer);
 }
 
 function getZipSession() {
-  if (zipSession) {
-    return zipSession;
-  }
-  if (typeof Worker !== "undefined") {
-    try {
-      zipSession = createWorkerZipSession();
-      return zipSession;
-    } catch (error) {
-      console.warn("Impossible d'initialiser le worker ZIP.", error);
-    }
-  }
-  zipSession = createMainZipSession();
+  if (!zipSession) zipSession = createZipSession();
   return zipSession;
 }
 
-function resetZipSession(options = {}) {
-  const { terminate = false } = options;
-  if (!zipSession) return;
-  if (zipSession.reset) {
-    try {
-      zipSession.reset();
-    } catch (error) {
-      // Ignore reset errors.
-    }
-  }
-  if (terminate && zipSession.terminate) {
-    zipSession.terminate();
-  }
+function createZipSession() {
+  let active;
+  try { active = typeof Worker !== "undefined" ? createWorkerZipSession() : createMainZipSession(); }
+  catch { active = createMainZipSession(); }
+  return {
+    async load(buffer) {
+      try { return await active.load(buffer.slice(0)); }
+      catch (error) {
+        if (active.type !== "worker") throw error;
+        active.terminate();
+        active = createMainZipSession();
+        return active.load(buffer);
+      }
+    },
+    getSvg: name => active.getSvg(name),
+    terminate: () => active.terminate ? active.terminate() : active.reset()
+  };
+}
+
+function resetZipSession() {
+  zipSession?.terminate?.();
   zipSession = null;
 }
 
 function createWorkerZipSession() {
-  if (!zipWorker) {
-    zipWorker = new Worker("zip-worker.js");
-    zipWorker.onmessage = handleZipWorkerMessage;
-    zipWorker.onerror = handleZipWorkerError;
-  }
-  return {
-    type: "worker",
-    load: (buffer) => postZipWorkerMessage("loadZip", { buffer }, buffer),
-    getSvg: (name) => postZipWorkerMessage("getSvg", { name }),
-    reset: () => postZipWorkerMessage("reset", {}).catch(() => {}),
-    terminate: () => {
-      zipWorker.terminate();
-      zipWorker = null;
-      rejectZipWorkerRequests(new Error("Worker terminé."));
-    }
+  const worker = new Worker("zip-worker.js");
+  const pending = new Map();
+  let nextId = 0, failure = null;
+  const fail = error => {
+    failure = error;
+    worker.terminate();
+    for (const { reject, timer } of pending.values()) { clearTimeout(timer); reject(error); }
+    pending.clear();
   };
+  worker.onmessage = event => {
+    const { id, ok, payload, error } = event.data || {};
+    const request = pending.get(id);
+    if (!request) return;
+    clearTimeout(request.timer); pending.delete(id);
+    if (ok) request.resolve(payload);
+    else request.reject(new Error(error?.message || "Erreur du lecteur ZIP."));
+  };
+  worker.onerror = () => fail(new Error("Le lecteur ZIP ne répond plus."));
+  function call(type, payload, buffer) {
+    return new Promise((resolve, reject) => {
+      if (failure) { reject(failure); return; }
+      const id = ++nextId;
+      const timer = setTimeout(() => fail(new Error("Le chargement ZIP a dépassé le délai de 30 secondes.")), 30000);
+      pending.set(id, { resolve, reject, timer });
+      try { worker.postMessage({ id, type, payload }, buffer ? [buffer] : []); }
+      catch (error) { clearTimeout(timer); pending.delete(id); reject(error); }
+    });
+  }
+  return { type: "worker", load: buffer => call("loadZip", { buffer }, buffer),
+    getSvg: name => call("getSvg", { name }), terminate: () => fail(new Error("Bibliothèque remplacée.")) };
 }
 
 function createMainZipSession() {
@@ -2412,7 +2472,7 @@ function collectZipEntries(zip) {
       duplicates += 1;
       return;
     }
-    entryMap.set(entryName, entryName);
+    entryMap.set(entryName, entry.name);
     rawItems.push({
       name,
       displayName: "",
@@ -2451,51 +2511,6 @@ function collectZipEntries(zip) {
       ignored
     }
   };
-}
-
-function postZipWorkerMessage(type, payload, transfer) {
-  return new Promise((resolve, reject) => {
-    if (!zipWorker) {
-      reject(new Error("Worker ZIP indisponible."));
-      return;
-    }
-    const id = ++zipWorkerRequestId;
-    zipWorkerRequests.set(id, { resolve, reject });
-    try {
-      if (transfer) {
-        zipWorker.postMessage({ id, type, payload }, [transfer]);
-      } else {
-        zipWorker.postMessage({ id, type, payload });
-      }
-    } catch (error) {
-      zipWorkerRequests.delete(id);
-      reject(error);
-    }
-  });
-}
-
-function handleZipWorkerMessage(event) {
-  const { id, ok, payload, error } = event.data || {};
-  const pending = zipWorkerRequests.get(id);
-  if (!pending) return;
-  zipWorkerRequests.delete(id);
-  if (ok) {
-    pending.resolve(payload);
-  } else {
-    pending.reject(new Error(error?.message || "Erreur worker ZIP."));
-  }
-}
-
-function handleZipWorkerError(event) {
-  const error = event?.message
-    ? new Error(event.message)
-    : new Error("Erreur du worker ZIP.");
-  rejectZipWorkerRequests(error);
-}
-
-function rejectZipWorkerRequests(error) {
-  zipWorkerRequests.forEach(({ reject }) => reject(error));
-  zipWorkerRequests.clear();
 }
 
 function extractFileName(filePath) {
@@ -2636,7 +2651,7 @@ async function readZipCache() {
 async function saveZipCache(buffer, meta) {
   try {
     const db = await openZipCache();
-    if (!db) return;
+    if (!db) return false;
     await new Promise((resolve, reject) => {
       const tx = db.transaction(DB_STORE, "readwrite");
       const store = tx.objectStore(DB_STORE);
@@ -2654,8 +2669,9 @@ async function saveZipCache(buffer, meta) {
         reject(tx.error);
       };
     });
+    return true;
   } catch (error) {
-    // Ignore cache write failures.
+    return false;
   }
 }
 
@@ -2693,4 +2709,79 @@ function normalizeSvg(text) {
 function setStatus(message, tone = "") {
   statusEl.textContent = message;
   statusEl.className = `status ${tone}`.trim();
+}
+
+
+function initShortcutControls() {
+  const status = document.getElementById("shortcut-status");
+  const startup = document.getElementById("shortcut-startup");
+  const supported = Boolean(Office.addin?.showAsTaskpane && Office.context.requirements.isSetSupported("SharedRuntime", "1.1"));
+  status.textContent = supported
+    ? "Ouvrez une fois le volet dans cette présentation. Il pourra ensuite être fermé. PowerPoint peut demander quelle action associer au raccourci."
+    : "Le raccourci global nécessite une version récente de PowerPoint et le nouveau manifeste. La recherche dans le volet reste disponible.";
+  startup.disabled = !supported;
+  if (!supported) return;
+  Office.addin.getStartupBehavior().then(value => { startup.checked = value === Office.StartupBehavior.load; }).catch(() => {});
+  startup.addEventListener("change", async () => {
+    startup.disabled = true;
+    try {
+      await Office.addin.setStartupBehavior(startup.checked ? Office.StartupBehavior.load : Office.StartupBehavior.none);
+      status.textContent = startup.checked ? "Raccourci chargé au prochain démarrage de cette présentation." : "Ouvrez le volet une fois pour activer le raccourci dans cette présentation.";
+    } catch (error) { startup.checked = !startup.checked; status.textContent = `Option indisponible : ${error.message || error}`; }
+    finally { startup.disabled = false; }
+  });
+}
+
+function getSelectedText() {
+  return new Promise((resolve, reject) => {
+    Office.context.document.getSelectedDataAsync(Office.CoercionType.Text, result => {
+      if (result.status === Office.AsyncResultStatus.Succeeded) resolve(String(result.value || "").trim());
+      else reject(result.error);
+    });
+  });
+}
+
+async function searchSelectedPictogram(event) {
+  if (shortcutBusy) { event?.completed?.(); return; }
+  shortcutBusy = true;
+  try {
+    // Capture the selection before opening the pane changes keyboard focus.
+    const [text, slideId] = await Promise.all([getSelectedText(), getSelectedSlideId()]);
+    await Office.addin.showAsTaskpane();
+    await initialization;
+    setSettingsPanelOpen(false);
+    if (!text) throw new Error("Sélectionnez d’abord un mot ou une expression dans la diapositive.");
+    if (!slideId) throw new Error("Sélectionnez une seule diapositive pour insérer un pictogramme.");
+    if (text.length > 240) throw new Error("Sélectionnez une expression de 240 caractères maximum.");
+    if (libraryBusy || !allLogos.length) throw new Error("Chargez votre bibliothèque ZIP avant d’utiliser le raccourci.");
+    if (aiEnabled && !isAiProviderReady()) throw new Error(providerWarning());
+    clearTimeout(searchTimer); searchTimer = null;
+    searchInput.value = text;
+    updateSearchClear();
+    const query = getNormalizedSearchQuery(), generation = libraryGeneration;
+    await runSearchCycle();
+    if (aiSearchState.error) throw new Error("La recherche IA a échoué. Aucun logo n’a été inséré.");
+    const top = getRenderableLogos()[0];
+    if (!top) throw new Error("Aucun pictogramme trouvé pour cette sélection.");
+    const validate = async () => {
+      if (getNormalizedSearchQuery() !== query || libraryGeneration !== generation || await getSelectedSlideId() !== slideId) {
+        throw new Error("La recherche ou la diapositive a changé. Relancez le raccourci pour insérer le logo.");
+      }
+    };
+    const operation = insertQueue.then(async () => {
+      const svg = await getPreparedSvg(top);
+      await validate();
+      if (!Office.context.requirements.isSetSupported("ImageCoercion", "1.2")) throw new Error("Cette version de PowerPoint ne prend pas en charge l’insertion SVG.");
+      // A shortcut adds a new pictogram, preserving the selected source text.
+      await goToSlide(slideId);
+      await insertSvg(svg, await getNextInsertPosition());
+      recordRecent(top);
+      setStatus(`Logo inséré : ${top.displayName || top.name}`, "success");
+    });
+    insertQueue = operation.catch(() => {});
+    await operation;
+  } catch (error) {
+    try { await Office.addin?.showAsTaskpane?.(); } catch {}
+    setStatus(error.message || String(error), "error");
+  } finally { shortcutBusy = false; event?.completed?.(); }
 }

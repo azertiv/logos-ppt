@@ -1,0 +1,41 @@
+
+> logos-ppt@1.0.0 test
+> node --test tests/*.test.js
+
+✔ HTTP boundary: token, host, origin, preflight, body and route restrictions (82.759833ms)
+✔ account, model and quota reads never start a model turn (67.231708ms)
+✔ rank uses ephemeral read-only thread and tolerates final-before-reply ordering (66.966709ms)
+✔ subscription mode refuses API-key identity and anonymous identity (146.741875ms)
+✔ unknown tasks and hallucinated candidate IDs are rejected (71.02925ms)
+✔ quota failure is explicit and never falls back to an API provider (65.465ms)
+✔ cancel, timeout and busy guard stop or interrupt work (613.537208ms)
+✔ unexpected tool requests are declined, process crashes can recover (187.0685ms)
+✔ managed ChatGPT login and logout operate only on companion account (129.69825ms)
+✔ runtime isolates Codex configuration, excludes API secrets and selects unelevated Windows sandbox (1.839ms)
+✔ 1740-item grid mounts only visible rows plus overscan at every density (7.206ms)
+✔ window clamps empty lists, far-beyond-bottom scroll and width changes (0.09225ms)
+✔ API keeps original endpoint, key, structured output and usage (20.100834ms)
+✔ Codex pairing credentials can only be sent to loopback and never follow redirects (1.403541ms)
+✔ limits: missing differs from zero, and distinct buckets are preserved (0.242917ms)
+✔ bounded task contract validates IDs, sizes and structured responses (0.703666ms)
+✔ provider readiness and cache isolate API, Codex and models (4.099833ms)
+✔ provider switch aborts in-flight work and prevents stale results (1.843416ms)
+✔ unknown candidate IDs never leak into displayed ranking (1.594708ms)
+✔ identical concurrent AI searches share one provider call and completed result (1.406459ms)
+✔ AI debounce resets to two seconds and Enter flush cancels the timer (1.35375ms)
+✔ search scores cached for one query are independent of subsequent queries (9.916291ms)
+✔ late SVG loads cannot repopulate a replaced library (1.2975ms)
+✔ shortcut shows selected text and adds one logo without replacement, duplicate shortcut ignored (1.061333ms)
+✔ shortcut refuses to insert if slide or search changed during AI/preparation (0.844542ms)
+✔ ZIP import parses nested SVGs and distinguishes same basenames (14.800542ms)
+✔ failed candidate ZIP preserves the active library (2.144583ms)
+✔ preview cache evicts old off-screen assets and revokes their URLs (1.350334ms)
+✔ large-library AI shortlist favors matching icons and prepares phrases once (8.550416ms)
+ℹ tests 29
+ℹ suites 0
+ℹ pass 29
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1504.611666

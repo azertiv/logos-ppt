@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "model": "gpt-5.6-luna",
+  "durationMs": 9130,
+  "expansion": {
+    "core_concepts": [
+      "supplier questionnaire"
+    ],
+    "visual_metaphors": [
+      "vendor evaluation",
+      "procurement assessment",
+      "business survey"
+    ],
+    "concrete_objects": [
+      "questionnaire form",
+      "clipboard",
+      "checklist",
+      "supplier",
+      "vendor",
+      "document"
+    ],
+    "related_keywords": [
+      "supplier survey",
+      "vendor questionnaire",
+      "procurement form",
+      "supplier assessment",
+      "due diligence",
+      "vendor onboarding"
+    ]
+  },
+  "ranking": {
+    "ordered_ids": [
+      1,
+      2
+    ],
+    "note": ""
+  }
+}

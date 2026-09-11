@@ -1,3 +1,8 @@
 node_modules/
 dist/
 .tmp/
+dist-companion/
+
+# Local conversation context is not part of the published source.
+docs/CONTEXTE_PROJET.md
+docs/context/

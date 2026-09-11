@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Atelier Pictos · Compagnon Codex</title><link rel="stylesheet" href="/dashboard.css"></head>
+<body>
+<main>
+  <header><span class="eyebrow">ATELIER PICTOS</span><span class="badge">Compagnon local · expérimental</span><h1>Des idées aux pictogrammes.</h1><p>Connectez votre abonnement ChatGPT et testez la recherche Codex, même sans PowerPoint.</p></header>
+  <p id="notice" role="status" aria-live="polite">Connexion au compagnon…</p>
+  <section><h2>1. Relier ce navigateur</h2><p>Ce code relie une page au compagnon ouvert sur cet ordinateur. Il change à chaque redémarrage.</p>
+    <label for="token">Code de liaison</label><div class="row"><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="Code affiché dans la fenêtre du compagnon"><button id="pair">Relier</button><button id="copy" class="secondary">Copier le code</button></div>
+    <p class="small">Dans le complément : Réglages → Recherche IA → Abonnement ChatGPT via Codex. Adresse : <strong id="address"></strong></p>
+  </section>
+  <section><h2>2. Connecter ChatGPT</h2><p id="account">Compte non vérifié.</p>
+    <div class="row"><button id="login">Se connecter avec ChatGPT</button><button id="refresh" class="secondary">Actualiser</button><button id="logout" class="secondary">Déconnecter le compte</button></div>
+    <div id="login-flow" hidden><p><a id="auth-link" target="_blank" rel="noopener noreferrer">Poursuivre la connexion dans le navigateur</a></p><p id="device-code"></p><button id="cancel-login" class="secondary">Annuler la connexion</button></div>
+    <details><summary>La connexion habituelle ne fonctionne pas ?</summary><p>Vous pouvez essayer la connexion par code si votre compte l’autorise.</p><button id="device-login" class="secondary">Obtenir un code de connexion</button></details>
+    <p class="small">Le compte est mémorisé par Codex sur cet ordinateur. La clé API de votre complément reste indépendante.</p>
+    <label for="model">Modèle Codex</label><select id="model"><option value="">Connectez-vous pour choisir un modèle</option></select>
+    <pre id="limits">Limites non disponibles.</pre><p class="small">Ces limites sont partagées avec vos autres usages Codex. Aucun coût API n’est calculé ici.</p>
+  </section>
+  <section><h2>3. Essayer une recherche</h2><p>Cette démonstration utilise une petite sélection d’exemples. Votre bibliothèque d’entreprise n’est pas nécessaire.</p>
+    <form id="demo"><label for="query">Quel concept souhaitez-vous illustrer ?</label><div class="row"><input id="query" value="ambition" maxlength="500" required><button id="search" type="submit">Rechercher avec Codex</button><button id="cancel-search" type="button" class="secondary" hidden>Annuler</button></div></form>
+    <p class="small">Chaque essai envoie la recherche et les noms des exemples à Codex et utilise votre quota. Deux étapes : trouver des concepts, puis classer les candidats.</p>
+    <p id="concepts"></p><ol id="results"></ol><p id="timing" class="small"></p>
+  </section>
+  <footer>Ce test vérifie le compagnon et Codex. La connexion depuis le complément PowerPoint devra être vérifiée après son installation autorisée.</footer>
+</main><script src="/ai-providers.js"></script><script src="/dashboard.js"></script>
+</body></html>

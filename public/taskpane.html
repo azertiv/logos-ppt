@@ -12,7 +12,7 @@
     />
     <link rel="stylesheet" href="taskpane.css" />
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="vendor/jszip-3.10.1.min.js"></script>
   </head>
   <body>
     <div class="app-shell">
@@ -44,6 +44,7 @@
           <div class="settings-panel-inner">
             <section class="settings-card">
               <div class="settings-intro">
+                <button id="settings-back" class="ghost" type="button" aria-label="Revenir aux pictogrammes">← Retour</button>
                 <h2>Réglages</h2>
                 <p>Source ZIP, affichage et recherche assistée.</p>
               </div>
@@ -79,13 +80,6 @@
             <section class="settings-card">
               <div class="settings-section-title">Affichage</div>
               <section class="controls">
-                <label class="density">
-                  <span>Logos par ligne</span>
-                  <div class="density-field">
-                    <input id="density-range" type="range" min="1" max="4" step="1" value="3" />
-                    <span id="density-value" class="density-value">3</span>
-                  </div>
-                </label>
                 <label class="sort">
                   <span>Tri</span>
                   <select id="sort-select" class="select">
@@ -103,11 +97,22 @@
             </section>
 
             <section class="settings-card">
+              <div class="settings-section-title">Raccourci PowerPoint</div>
+              <p class="settings-note">Sélectionnez du texte dans la diapositive, puis appuyez sur <strong>Ctrl + Maj + P</strong> pour rechercher et insérer le premier résultat.</p>
+              <p id="shortcut-status" class="settings-meta">Vérification de compatibilité…</p>
+              <label class="checkbox"><input id="shortcut-startup" type="checkbox" /><span>Garder le raccourci disponible à la réouverture de cette présentation</span></label>
+            </section>
+            <section class="settings-card">
               <div class="settings-section-title">Recherche IA</div>
-              <p class="settings-note">
-                Mode sémantique via <strong>gpt-5.4-nano</strong> pour élargir, trier et reranker les
-                résultats. La clé reste locale à ce navigateur.
-              </p>
+              <p class="settings-note">Élargissez une idée en concepts visuels, puis classez les pictogrammes de votre bibliothèque.</p>
+              <label class="settings-field">
+                <span>Utiliser l’IA avec</span>
+                <select id="ai-provider" class="settings-input">
+                  <option value="api">Clé API OpenAI</option>
+                  <option value="codex">Abonnement ChatGPT via Codex</option>
+                </select>
+              </label>
+              <div id="ai-api-settings">
               <label class="settings-field">
                 <span>Clé API OpenAI</span>
                 <input
@@ -124,12 +129,23 @@
                 <button id="ai-api-save" class="primary" type="button">Enregistrer</button>
                 <button id="ai-api-clear" class="ghost" type="button">Supprimer</button>
               </div>
+              </div>
+              <div id="ai-codex-settings" class="hidden">
+                <p class="settings-note">Lancez le compagnon sur cet ordinateur, connectez-y ChatGPT et copiez son code de liaison. Cette option utilise votre quota Codex partagé.</p>
+                <label class="settings-field"><span>Code de liaison du compagnon</span><input id="ai-codex-token" class="settings-input" type="password" autocomplete="off" spellcheck="false" placeholder="Code affiché par le compagnon"></label>
+                <details class="settings-note"><summary>Adresse du compagnon</summary><label class="settings-field"><span>Adresse locale</span><input id="ai-codex-url" class="settings-input" type="url" value="http://127.0.0.1:43129" spellcheck="false"></label></details>
+                <div class="settings-actions"><button id="ai-codex-connect" class="primary" type="button">Vérifier la connexion</button><button id="ai-codex-open" class="ghost" type="button">Ouvrir le compagnon</button></div>
+                <label class="settings-field"><span>Modèle Codex</span><select id="ai-codex-model" class="settings-input"><option value="">Vérifiez la connexion</option></select></label>
+                <p id="ai-codex-limits" class="settings-meta codex-limits" aria-live="polite">Limites non disponibles.</p>
+                <p class="settings-note">Connexion expérimentale. Si Codex est indisponible, la recherche locale continue. Aucun basculement automatique vers l’API payante.</p>
+              </div>
               <div id="ai-settings-status" class="settings-meta">
                 Clé absente. Le mode IA restera désactivé.
               </div>
+              <div id="ai-api-usage">
               <div class="usage-grid">
                 <div class="usage-item">
-                  <span>Appels</span>
+                  <span>Appels API</span>
                   <strong id="ai-usage-calls">0</strong>
                 </div>
                 <div class="usage-item">
@@ -154,21 +170,26 @@
                 </div>
               </div>
               <div id="ai-pricing-note" class="settings-meta">
-                Estimation gpt-5.4-nano: input $0.20/M, cached input $0.02/M, output $1.25/M.
+                Estimation gpt-5.6-luna: input $0.20/M, cached input $0.02/M, output $1.20/M.
               </div>
               <button id="ai-usage-reset" class="ghost" type="button">Réinitialiser le suivi</button>
+              </div>
             </section>
           </div>
         </aside>
 
         <section id="status" class="status" aria-live="polite"></section>
 
-        <section class="grid" id="logo-grid" aria-live="polite"></section>
+        <section class="grid" id="logo-grid" aria-label="Pictogrammes"></section>
       </div>
 
       <div class="search-dock" id="search-dock">
         <div class="search-dock-inner">
-          <div id="logo-count" class="count-bubble">0 logos</div>
+          <div id="logo-count" class="count-bubble" aria-live="polite">0 logos</div>
+          <label class="dock-density" title="Logos par ligne">
+            <input id="density-range" aria-label="Logos par ligne" type="range" min="1" max="6" step="1" value="3" />
+            <span id="density-value" aria-hidden="true">3</span>
+          </label>
           <label class="search search-floating" aria-label="Recherche">
             <div class="search-field">
               <input id="search-input" type="search" placeholder="Tapez un mot-clé ou un concept…" />
@@ -184,6 +205,9 @@
       </div>
     </div>
 
+    <script src="ai-tasks.js"></script>
+    <script src="ai-providers.js"></script>
+    <script src="grid-window.js"></script>
     <script src="taskpane.js"></script>
   </body>
 </html>

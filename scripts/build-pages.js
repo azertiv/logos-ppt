@@ -38,6 +38,11 @@ function build() {
   if (fs.existsSync(keywordsPath)) {
     copyFileSync(keywordsPath, path.join(distDir, "keywords.json"));
   }
+  copyFileSync(path.join(root, "manifest.xml"), path.join(distDir, "manifest.xml"));
+  fs.writeFileSync(path.join(distDir, "deployment.json"), JSON.stringify({
+    version: require(path.join(root, "package.json")).version,
+    commit: process.env.GITHUB_SHA || null
+  }, null, 2) + "\n");
   fs.writeFileSync(path.join(distDir, ".nojekyll"), "");
   console.log("Built dist/ for GitHub Pages.");
 }

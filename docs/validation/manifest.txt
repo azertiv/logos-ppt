@@ -1,0 +1,67 @@
+(node:2399) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Validation Information:
+Manifest ID Valid Prefix: The product ID in the manifest has a valid prefix
+  - Details: 2111ce12-a6c7-472b-b619-63d93eff5bc0
+
+Manifest ID Correct Structure: The structure of the product ID is correct.
+  - Details: 2111ce12-a6c7-472b-b619-63d93eff5bc0
+
+Package Type Identified: Package of your add-in was parsed successfully.
+
+Correct Package: Your package matches the submission type.
+
+Valid Manifest Schema: Your manifest does adhere to the current set of XML schema definitions for Add-in manifests.
+
+Manifest Version Correct Structure: The manifest version number has the correct structure for the platform that it supports.
+
+Manifest Version Correct Value: The manifest version number is greater or equal to 1.0.
+
+Desktop Source Location Present: A desktop or default source location URL is found.
+
+Secure Desktop Source Location: The manifest desktop source location URLs use HTTPS.
+
+The manifest source location URLs are valid.: The manifest source location URLs are valid.
+
+Supported Office Identified: Supported Office products were successfully determined.
+
+Support URL Present: The manifest support URL is present.
+  - Details: https://azertiv.github.io/logos-ppt/
+
+Valid Support URL structure: The manifest support URL has valid structure.
+
+Valid OnlineMeetingCommandSurface ExtensionPoint.: OnlineMeetingCommandSurface ExtensionPoint extracted from manifest is found to be valid.
+
+High Resolution Icon Present: A high resolution icon element was expected and is present.
+  - Details: https://azertiv.github.io/logos-ppt/assets/icon-128.png
+
+Supported High Resolution Icon URL File Extension: The manifest high resolution icon URL has a valid image file extension.
+  - Details: png
+
+Secure High Resolution Icon URL: The manifest high resolution icon URL uses HTTPS.
+  - Details: https://azertiv.github.io/logos-ppt/assets/icon-128.png
+
+Icon Present: A icon element was expected and is present.
+  - Details: https://azertiv.github.io/logos-ppt/assets/icon-32.png
+
+Supported Icon URL File Extension: The manifest icon URL has a valid image file extension.
+  - Details: png
+
+The manifest icon URL uses HTTPS.: Secure Icon URL
+  - Details: https://azertiv.github.io/logos-ppt/assets/icon-32.png
+
+Acceptance Test Completed: Acceptance test service has finished checking provided add-in.
+
+
+Based on the requirements specified in your manifest, your add-in can run on the following platforms; your add-in will be tested on these platforms when you submit it to the Office Store:
+  - PowerPoint on iPad
+  - PowerPoint 2016 or later on Mac
+  - PowerPoint 2019 or later on Mac
+  - PowerPoint on the web
+  - PowerPoint on Windows (Microsoft 365)
+  - PowerPoint on Mac (Microsoft 365)
+Important: This analysis is based on the requirements specified in your manifest and does not account for any runtime JavaScript calls within your add-in. For information about which API sets and features are supported on each platform, see Office Add-in host and platform availability. (https://docs.microsoft.com/office/dev/add-ins/overview/office-add-in-availability).
+
+*This does not include mobile apps. You can opt-in to support mobile apps when you submit your add-in.
+
+The manifest is valid.

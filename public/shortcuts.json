@@ -1,0 +1,4 @@
+{
+  "actions": [{ "id": "SearchSelectedPictogram", "type": "ExecuteFunction", "name": "Rechercher et insérer un pictogramme depuis le texte sélectionné" }],
+  "shortcuts": [{ "action": "SearchSelectedPictogram", "key": { "default": "Ctrl+Shift+P", "windows": "Ctrl+Shift+P", "mac": "Cmd+Shift+P" } }]
+}

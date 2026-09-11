@@ -1,6 +1,6 @@
 /* global JSZip */
 
-importScripts("https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js");
+importScripts("vendor/jszip-3.10.1.min.js");
 
 let zipInstance = null;
 let entryMap = new Map();
@@ -64,7 +64,7 @@ async function handleLoadZip(buffer) {
       duplicates += 1;
       return;
     }
-    entryMap.set(entryName, entryName);
+    entryMap.set(entryName, entry.name);
     rawItems.push({
       name,
       displayName: "",

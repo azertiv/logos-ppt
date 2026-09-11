@@ -6,7 +6,7 @@
   xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
   xsi:type="TaskPaneApp">
   <Id>2111ce12-a6c7-472b-b619-63d93eff5bc0</Id>
-  <Version>0.1.0.0</Version>
+  <Version>1.0.0.0</Version>
   <ProviderName>Logos PPT</ProviderName>
   <DefaultLocale>fr-FR</DefaultLocale>
   <DisplayName DefaultValue="Atelier Pictos" />
@@ -31,9 +31,11 @@
 
   <Permissions>ReadWriteDocument</Permissions>
 
-  <VersionOverrides xsi:type="ov:VersionOverridesV1_1">
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="ov:VersionOverridesV1_0">
+    <Requirements><bt:Sets DefaultMinVersion="1.1"><bt:Set Name="SharedRuntime" MinVersion="1.1" /></bt:Sets></Requirements>
     <Hosts>
       <Host xsi:type="ov:Presentation">
+        <Runtimes><Runtime resid="Pictos.TaskpaneUrl" lifetime="long" /></Runtimes>
         <DesktopFormFactor>
           <ExtensionPoint xsi:type="ov:PrimaryCommandSurface">
             <OfficeTab id="TabHome">
@@ -88,4 +90,5 @@
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>
+  <ExtendedOverrides Url="https://azertiv.github.io/logos-ppt/shortcuts.json" />
 </OfficeApp>
