@@ -10,7 +10,7 @@
       href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="taskpane.css" />
+    <link rel="stylesheet" href="taskpane.css?v=1.1.1" />
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
     <script src="vendor/jszip-3.10.1.min.js"></script>
   </head>
@@ -52,17 +52,18 @@
             <input id="density-range" aria-label="Logos par ligne" type="range" min="1" max="6" step="1" value="3" />
             <span id="density-value" aria-hidden="true">3</span>
           </label>
-          <label class="search search-floating" aria-label="Recherche">
+          <form id="search-form" class="search search-floating" role="search" autocomplete="off">
             <div class="search-field">
-              <input id="search-input" type="search" placeholder="Tapez un mot-clé ou un concept…" />
+              <input id="search-input" name="pictogram-search" type="search" aria-label="Rechercher un pictogramme" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Tapez un mot-clé ou un concept…" />
               <button id="ai-toggle" class="ai-toggle" type="button" aria-label="Activer le mode AI" aria-pressed="false">
                 AI
               </button>
             </div>
-          </label>
+          </form>
           <button id="refresh-btn" class="refresh-round" type="button" aria-label="Recharger" title="Recharger">
             <span aria-hidden="true">↺</span>
           </button>
+          <button id="selection-insert" class="selection-action" type="button" title="Rechercher et insérer le premier pictogramme à partir du texte sélectionné dans la diapositive">Insérer depuis la sélection</button>
         </div>
       </div>
 
@@ -139,10 +140,14 @@
                 <details class="info-tip"><summary aria-label="À propos de l’insertion">i</summary><div class="info-content"><p>Le remplacement s’applique aux logos insérés par clic. Le raccourci ajoute un pictogramme et conserve toujours le texte sélectionné.</p></div></details>
               </div>
               <label class="checkbox"><input id="replace-toggle" type="checkbox" /><span>Remplacer la sélection</span></label>
-              <div class="shortcut-row"><span>Depuis le texte sélectionné</span><kbd>Ctrl + Alt + P</kbd>
-                <details class="info-tip"><summary aria-label="Utiliser le raccourci PowerPoint">i</summary><div class="info-content"><p>Sélectionnez une expression dans PowerPoint, puis utilisez ce raccourci pour rechercher et insérer le premier résultat. Le volet peut être fermé après sa première ouverture, sur les versions compatibles.</p><p id="shortcut-status" class="settings-meta">Chargement…</p></div></details>
+              <div class="shortcut-row"><span>Depuis le texte sélectionné</span><kbd id="shortcut-key">Ctrl + Alt + P</kbd>
+                <details class="info-tip"><summary aria-label="Utiliser le raccourci PowerPoint">i</summary><div class="info-content"><p>Sélectionnez une expression dans la diapositive, puis utilisez ce raccourci pour rechercher et insérer le premier résultat. Sur une version compatible, le volet peut être fermé après sa première ouverture.</p><p>Le bouton « Insérer depuis la sélection » réalise la même action sans raccourci.</p></div></details>
+                <p id="shortcut-status" class="settings-meta" role="status" aria-live="polite">Vérification du raccourci…</p>
+                <div class="settings-actions"><button id="shortcut-refresh" class="ghost" type="button">Vérifier</button><button id="shortcut-reset" class="ghost hidden" type="button">Rétablir le raccourci</button></div>
+                <a id="shortcut-manifest" class="hidden" href="manifest.xml" target="_blank" rel="noopener">Télécharger le manifeste à jour</a>
               </div>
-              <label class="checkbox"><input id="shortcut-startup" type="checkbox" /><span>Activer à l’ouverture de cette présentation</span></label>
+              <label class="checkbox"><input id="shortcut-startup" type="checkbox" /><span>Charger le complément à l’ouverture de cette présentation</span></label>
+              <p id="shortcut-startup-status" class="settings-meta" aria-live="polite"></p>
             </section>
 
             <section class="settings-card" aria-labelledby="display-title">
@@ -160,6 +165,6 @@
     <script src="ai-tasks.js"></script>
     <script src="ai-providers.js"></script>
     <script src="grid-window.js"></script>
-    <script src="taskpane.js"></script>
+    <script src="taskpane.js?v=1.1.1"></script>
   </body>
 </html>

@@ -11,7 +11,7 @@ function setup(existingStorage = new Map()) {
     if (!nodes.has(id)) nodes.set(id, { value: "", textContent: "", dataset: {}, classList: { toggle() {} }, setAttribute() {}, addEventListener() {}, replaceChildren() {}, add() {} });
     return nodes.get(id);
   };
-  const context = vm.createContext({ document: { getElementById: node }, Office: { onReady() {} }, window: { localStorage: { getItem: k => storage.get(k), setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k) } }, console, AbortController, Map, Set, Intl, crypto: { randomUUID: () => "test" }, PictosAiTasks: tasks });
+  const context = vm.createContext({ document: { getElementById: node }, Office: { onReady() {} }, window: { localStorage: { getItem: k => storage.get(k), setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k) } }, console, AbortController, Map, Set, Intl, setTimeout, clearTimeout, crypto: { randomUUID: () => "test" }, PictosAiTasks: tasks });
   const run = source => vm.runInContext(source, context);
   run(fs.readFileSync(path.join(__dirname, "../public/taskpane.js"), "utf8"));
   run('requestRender = () => {}; syncAiToggle = () => {}; syncAiSettingsStatus = () => {};');
@@ -110,7 +110,6 @@ test("late SVG loads cannot repopulate a replaced library", async () => {
 function shortcutSetup() {
   const result = setup();
   const { run, context } = result;
-  context.clearTimeout = () => {};
   context.Office.addin = { showAsTaskpane: async () => {} };
   context.Office.context = { requirements: { isSetSupported: () => true } };
   context.slide = 'one'; context.insertions = 0; context.deleted = 0;
@@ -137,6 +136,88 @@ test("shortcut refuses to insert if slide or search changed during AI/preparatio
   await run('searchSelectedPictogram()');
   assert.equal(context.insertions, 0);
   assert.match(node('status').textContent, /changé/);
+});
+
+test("shared runtime alone never claims that PowerPoint supports keyboard shortcuts", async () => {
+  const { run, context, node } = setup();
+  let queried = false;
+  context.Office.context = { requirements: { isSetSupported: name => name === 'SharedRuntime' }, diagnostics: { version: '16.0.17425.20146' } };
+  context.Office.actions = { associate() {}, getShortcuts: async () => { queried = true; return { SearchSelectedPictogram: 'Ctrl+Alt+P' }; } };
+  await run('refreshShortcutStatus()');
+  assert.equal(node('shortcut-status').dataset.state, 'unsupported');
+  assert.match(node('shortcut-status').textContent, /16\.0\.17425\.20146/);
+  assert.equal(queried, false);
+  assert.equal(node('shortcut-refresh').disabled, false);
+});
+
+test("shortcut diagnosis distinguishes missing manifest, conflict, actual binding and Office failure", async () => {
+  const { run, context, node } = setup();
+  context.Office.context = { requirements: { isSetSupported: () => true } };
+  context.Office.actions = { associate() {}, getShortcuts: async () => ({}) };
+  await run('refreshShortcutStatus()');
+  assert.equal(node('shortcut-status').dataset.state, 'missing');
+  context.Office.actions.getShortcuts = async () => ({ SearchSelectedPictogram: null });
+  await run('refreshShortcutStatus()');
+  assert.equal(node('shortcut-status').dataset.state, 'conflict');
+  context.Office.actions.getShortcuts = async () => ({ SearchSelectedPictogram: 'Ctrl+Shift+P' });
+  await run('refreshShortcutStatus()');
+  assert.equal(node('shortcut-status').dataset.state, 'registered');
+  assert.equal(node('shortcut-key').textContent, 'Ctrl + Shift + P');
+  context.Office.actions.getShortcuts = async () => { throw new Error('Runtime unavailable'); };
+  await run('refreshShortcutStatus()');
+  assert.equal(node('shortcut-status').dataset.state, 'error');
+  assert.match(node('shortcut-status').textContent, /Runtime unavailable/);
+});
+
+test("action registration retries when Office was unavailable and restoration only changes this action", async () => {
+  const { run, context, node } = setup();
+  context.Office.context = { platform: 'Mac', requirements: { isSetSupported: () => true } };
+  let attempts = 0, mapping;
+  context.Office.actions = {
+    associate: () => { if (++attempts === 1) throw new Error('Not ready'); },
+    getShortcuts: async () => ({ SearchSelectedPictogram: mapping?.SearchSelectedPictogram || 'Cmd+Shift+P' }),
+    replaceShortcuts: async value => { mapping = JSON.parse(JSON.stringify(value)); }
+  };
+  run('registerSelectionAction()');
+  assert.equal(run('selectionActionRegistered'), false);
+  await run('refreshShortcutStatus()');
+  assert.equal(attempts, 2);
+  assert.equal(node('shortcut-key').textContent, 'Cmd + Shift + P');
+  assert.equal(mapping, undefined);
+  await run('restoreSelectionShortcut()');
+  assert.deepEqual(mapping, { SearchSelectedPictogram: 'Cmd+Alt+P' });
+  assert.equal(node('shortcut-key').textContent, 'Cmd + Alt + P');
+  assert.equal(attempts, 2);
+});
+
+test("selection button works without shared runtime and always releases its busy state", async () => {
+  const { run, context, node } = shortcutSetup();
+  context.Office.addin = undefined;
+  context.Office.context.requirements.isSetSupported = name => name !== 'SharedRuntime';
+  await run('searchSelectedPictogram()');
+  assert.equal(context.insertions, 1);
+  assert.equal(node('selection-insert').disabled, false);
+  context.Office.context.requirements.isSetSupported = () => true;
+  context.Office.addin = { showAsTaskpane: async () => { throw new Error('Not running in a shared runtime'); } };
+  await run('searchSelectedPictogram(undefined, { revealPane: false })');
+  assert.equal(context.insertions, 2);
+  run('getSelectedText=async()=>{throw new Error("Selection unavailable")}');
+  let completions = 0;
+  context.actionEvent = { completed: () => completions++ };
+  await run('searchSelectedPictogram(actionEvent)');
+  assert.equal(completions, 1);
+  assert.equal(context.insertions, 2);
+  assert.equal(node('selection-insert').disabled, false);
+  assert.match(node('status').textContent, /Selection unavailable/);
+});
+
+test("captured text remains visible when insertion is blocked by a missing library", async () => {
+  const { run, context, node } = shortcutSetup();
+  run('allLogos=[]');
+  await run('searchSelectedPictogram()');
+  assert.equal(node('search-input').value, 'Supplier Questionnaire');
+  assert.equal(context.insertions, 0);
+  assert.match(node('status').textContent, /bibliothèque ZIP/);
 });
 
 test("ZIP import parses nested SVGs and distinguishes same basenames", async () => {

@@ -141,6 +141,9 @@ const PREVIEW_CACHE_BYTES = 16 * 1024 * 1024;
 let previewCacheBytes = 0;
 let initialization;
 let shortcutBusy = false;
+let selectionActionRegistered = false;
+let selectionActionError = "";
+let shortcutCheckPromise = null;
 const SLIDE_ID_CACHE_MS = 1000;
 const INSERT_BASE_POSITION = { left: 48, top: 48 };
 const INSERT_OFFSET_STEP = { x: 18, y: 18 };
@@ -161,7 +164,7 @@ const AI_PRICING_PER_MILLION = {
   output: 1.2
 };
 
-if (Office.actions?.associate) Office.actions.associate("SearchSelectedPictogram", searchSelectedPictogram);
+registerSelectionAction();
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.PowerPoint) {
@@ -169,6 +172,7 @@ Office.onReady((info) => {
     return;
   }
 
+  registerSelectionAction();
   initialization = init();
   initialization.catch((error) => {
     console.error(error);
@@ -180,6 +184,8 @@ async function init() {
   restorePreferences();
   refreshBtn.addEventListener("click", () => loadLogos({ force: true }));
   initShortcutControls();
+  document.getElementById("selection-insert").addEventListener("click", () => searchSelectedPictogram(undefined, { revealPane: false }));
+  document.getElementById("search-form").addEventListener("submit", event => event.preventDefault());
   searchInput.addEventListener("input", () => {
     updateSearchClear();
     if (!isComposing) scheduleSearch();
@@ -404,7 +410,7 @@ function setSettingsPanelOpen(isOpen) {
   if (settingsPanel) {
     settingsPanel.classList.toggle("hidden", !settingsPanelOpen);
     settingsPanel.setAttribute("aria-hidden", settingsPanelOpen ? "false" : "true");
-    if (settingsPanelOpen) { document.getElementById("settings-content").scrollTop = 0; document.getElementById("settings-back").focus(); }
+    if (settingsPanelOpen) { document.getElementById("settings-content").scrollTop = 0; document.getElementById("settings-back").focus(); refreshShortcutStatus(); }
     else settingsButton?.focus();
   }
 }
@@ -2782,22 +2788,122 @@ function setStatus(message, tone = "") {
 }
 
 
-function initShortcutControls() {
+function registerSelectionAction() {
+  if (selectionActionRegistered || typeof Office.actions?.associate !== "function") return;
+  try {
+    Office.actions.associate("SearchSelectedPictogram", searchSelectedPictogram);
+    selectionActionRegistered = true;
+    selectionActionError = "";
+  } catch (error) { selectionActionError = error.message || String(error); }
+}
+
+function supportsOfficeSet(name) {
+  try { return Boolean(Office.context?.requirements?.isSetSupported(name, "1.1")); }
+  catch { return false; }
+}
+
+function defaultSelectionShortcut() {
+  return String(Office.context?.platform || "").toLowerCase() === "mac" ? "Cmd+Alt+P" : "Ctrl+Alt+P";
+}
+
+function officeCallWithTimeout(operation, message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), 5000);
+    Promise.resolve().then(operation).then(resolve, reject).finally(() => clearTimeout(timer));
+  });
+}
+
+async function checkShortcutRegistration() {
   const status = document.getElementById("shortcut-status");
+  const key = document.getElementById("shortcut-key");
+  const reset = document.getElementById("shortcut-reset");
+  const manifest = document.getElementById("shortcut-manifest");
+  const defaultKey = defaultSelectionShortcut();
+  key.textContent = defaultKey.replaceAll("+", " + ");
+  reset.classList.toggle("hidden", true);
+  manifest.classList.toggle("hidden", true);
+  status.dataset.state = "checking";
+  status.textContent = "Vérification du raccourci auprès de PowerPoint…";
+  const update = (state, message) => { status.dataset.state = state; status.textContent = message; };
+  if (!supportsOfficeSet("KeyboardShortcuts")) {
+    const version = Office.context?.diagnostics?.version;
+    update("unsupported", `Cette version de PowerPoint ne propose pas les raccourcis de compléments${version ? ` (${version})` : ""}. Utilisez « Insérer depuis la sélection » dans le volet.`);
+    return;
+  }
+  if (!supportsOfficeSet("SharedRuntime") || typeof Office.actions?.getShortcuts !== "function") {
+    update("unavailable", "La vérification du raccourci est indisponible. Mettez à jour le complément avec le manifeste actuel, puis rouvrez-le.");
+    manifest.classList.toggle("hidden", false);
+    return;
+  }
+  registerSelectionAction();
+  if (!selectionActionRegistered) {
+    update("error", `L’action n’a pas pu être chargée. Rouvrez le volet.${selectionActionError ? ` ${selectionActionError}` : ""}`);
+    return;
+  }
+  try {
+    const shortcuts = await officeCallWithTimeout(() => Office.actions.getShortcuts(), "PowerPoint n’a pas répondu à la vérification. Réessayez.");
+    if (!shortcuts || !Object.prototype.hasOwnProperty.call(shortcuts, "SearchSelectedPictogram")) {
+      update("missing", "PowerPoint n’a pas enregistré cette action. Mettez à jour le complément avec le manifeste actuel, puis ouvrez son volet une fois.");
+      manifest.classList.toggle("hidden", false);
+      return;
+    }
+    const actual = shortcuts.SearchSelectedPictogram;
+    if (actual === null) {
+      update("conflict", "Ce raccourci a été attribué à une autre action. Rétablissez-le, puis choisissez Atelier Pictos si PowerPoint vous demande quelle action utiliser.");
+    } else if (typeof actual === "string" && actual.trim()) {
+      key.textContent = actual.replaceAll("+", " + ");
+      update("registered", "Raccourci enregistré par PowerPoint. Sélectionnez le texte dans la diapositive, puis appuyez sur les touches indiquées.");
+    } else {
+      update("error", "PowerPoint n’a pas renvoyé de raccourci utilisable. Rouvrez le volet, puis vérifiez à nouveau.");
+      return;
+    }
+    reset.classList.toggle("hidden", actual === defaultKey || typeof Office.actions?.replaceShortcuts !== "function");
+  } catch (error) {
+    update("error", `Raccourci non vérifié : ${error.message || error}`);
+    manifest.classList.toggle("hidden", false);
+  }
+}
+
+function refreshShortcutStatus() {
+  if (shortcutCheckPromise) return shortcutCheckPromise;
+  const button = document.getElementById("shortcut-refresh");
+  button.disabled = true;
+  shortcutCheckPromise = checkShortcutRegistration().finally(() => { button.disabled = false; shortcutCheckPromise = null; });
+  return shortcutCheckPromise;
+}
+
+async function restoreSelectionShortcut() {
+  const button = document.getElementById("shortcut-reset");
+  button.disabled = true;
+  try {
+    if (shortcutCheckPromise) await shortcutCheckPromise;
+    await officeCallWithTimeout(() => Office.actions.replaceShortcuts({ SearchSelectedPictogram: defaultSelectionShortcut() }), "PowerPoint n’a pas confirmé le changement. Vérifiez le raccourci à nouveau.");
+    await refreshShortcutStatus();
+  } catch (error) {
+    const status = document.getElementById("shortcut-status");
+    status.dataset.state = "error";
+    status.textContent = `Raccourci non rétabli : ${error.message || error}`;
+  } finally { button.disabled = false; }
+}
+
+function initShortcutControls() {
+  document.getElementById("shortcut-refresh").addEventListener("click", refreshShortcutStatus);
+  document.getElementById("shortcut-reset").addEventListener("click", restoreSelectionShortcut);
+  refreshShortcutStatus();
+  const status = document.getElementById("shortcut-startup-status");
   const startup = document.getElementById("shortcut-startup");
-  const supported = Boolean(Office.addin?.showAsTaskpane && Office.context.requirements.isSetSupported("SharedRuntime", "1.1"));
-  status.textContent = supported
-    ? "Ouvrez une fois le volet dans cette présentation. Il pourra ensuite être fermé. PowerPoint peut demander quelle action associer au raccourci."
-    : "Le raccourci global nécessite une version récente de PowerPoint et le nouveau manifeste. La recherche dans le volet reste disponible.";
-  startup.disabled = !supported;
-  if (!supported) return;
-  Office.addin.getStartupBehavior().then(value => { startup.checked = value === Office.StartupBehavior.load; }).catch(() => {});
+  const supported = supportsOfficeSet("SharedRuntime") && typeof Office.addin?.getStartupBehavior === "function" && typeof Office.addin?.setStartupBehavior === "function";
+  startup.disabled = true;
+  if (!supported) { status.textContent = "Le chargement en arrière-plan n’est pas disponible dans ce contexte PowerPoint."; return; }
+  officeCallWithTimeout(() => Office.addin.getStartupBehavior(), "Le chargement automatique n’a pas pu être vérifié.")
+    .then(value => { startup.checked = value === Office.StartupBehavior.load; startup.disabled = false; })
+    .catch(error => { status.textContent = error.message || String(error); });
   startup.addEventListener("change", async () => {
     startup.disabled = true;
     try {
-      await Office.addin.setStartupBehavior(startup.checked ? Office.StartupBehavior.load : Office.StartupBehavior.none);
-      status.textContent = startup.checked ? "Raccourci chargé au prochain démarrage de cette présentation." : "Ouvrez le volet une fois pour activer le raccourci dans cette présentation.";
-    } catch (error) { startup.checked = !startup.checked; status.textContent = `Option indisponible : ${error.message || error}`; }
+      await officeCallWithTimeout(() => Office.addin.setStartupBehavior(startup.checked ? Office.StartupBehavior.load : Office.StartupBehavior.none), "PowerPoint n’a pas confirmé le changement. Rouvrez le volet pour vérifier cette option.");
+      status.textContent = startup.checked ? "Le complément se chargera à la prochaine ouverture de cette présentation." : "Ouvrez le volet pour charger le complément dans cette présentation.";
+    } catch (error) { startup.checked = !startup.checked; status.textContent = `Option non confirmée : ${error.message || error}`; }
     finally { startup.disabled = false; }
   });
 }
@@ -2811,23 +2917,27 @@ function getSelectedText() {
   });
 }
 
-async function searchSelectedPictogram(event) {
+async function searchSelectedPictogram(event, { revealPane = true } = {}) {
   if (shortcutBusy) { event?.completed?.(); return; }
   shortcutBusy = true;
+  const button = document.getElementById("selection-insert");
+  button.disabled = true;
+  setStatus("Lecture du texte sélectionné…");
   try {
     // Capture the selection before opening the pane changes keyboard focus.
-    const [text, slideId] = await Promise.all([getSelectedText(), getSelectedSlideId()]);
-    await Office.addin.showAsTaskpane();
+    const [text, slideId] = await officeCallWithTimeout(() => Promise.all([getSelectedText(), getSelectedSlideId()]), "PowerPoint n’a pas renvoyé la sélection. Sélectionnez le texte dans la diapositive et réessayez.");
+    // A visible-pane button remains usable without the optional shared runtime.
+    if (revealPane && supportsOfficeSet("SharedRuntime")) await Office.addin?.showAsTaskpane?.();
     await initialization;
     setSettingsPanelOpen(false);
     if (!text) throw new Error("Sélectionnez d’abord un mot ou une expression dans la diapositive.");
     if (!slideId) throw new Error("Sélectionnez une seule diapositive pour insérer un pictogramme.");
     if (text.length > 240) throw new Error("Sélectionnez une expression de 240 caractères maximum.");
-    if (libraryBusy || !allLogos.length) throw new Error("Chargez votre bibliothèque ZIP avant d’utiliser le raccourci.");
-    if (aiEnabled && !isAiProviderReady()) throw new Error(providerWarning());
     clearTimeout(searchTimer); searchTimer = null;
     searchInput.value = text;
     updateSearchClear();
+    if (libraryBusy || !allLogos.length) throw new Error("Chargez votre bibliothèque ZIP avant l’insertion depuis la sélection.");
+    if (aiEnabled && !isAiProviderReady()) throw new Error(providerWarning());
     const query = getNormalizedSearchQuery(), generation = libraryGeneration;
     await runSearchCycle();
     if (aiSearchState.error) throw new Error("La recherche IA a échoué. Aucun logo n’a été inséré.");
@@ -2851,7 +2961,7 @@ async function searchSelectedPictogram(event) {
     insertQueue = operation.catch(() => {});
     await operation;
   } catch (error) {
-    try { await Office.addin?.showAsTaskpane?.(); } catch {}
+    try { if (revealPane) await Office.addin?.showAsTaskpane?.(); } catch {}
     setStatus(error.message || String(error), "error");
-  } finally { shortcutBusy = false; event?.completed?.(); }
+  } finally { shortcutBusy = false; button.disabled = false; event?.completed?.(); }
 }

@@ -1,10 +1,10 @@
 # Mise à jour et tests PowerPoint Windows
 
-État au 11 septembre 2026 : la mise à jour est publiée par le workflow GitHub Pages après les tests ; son résultat se vérifie dans les Actions du dépôt. Le manifeste courant est `manifest.xml` version **1.0.1.0**. Le compagnon a réussi une recherche réelle sur le Mac de développement, et l’utilisateur a confirmé le fonctionnement de la liaison Codex sur Windows. Le poste Windows professionnel et ses 1 740 vrais SVG n’ont pas été directement accessibles aux essais du développeur.
+État au 11 septembre 2026 : la mise à jour est publiée par le workflow GitHub Pages après les tests ; son résultat se vérifie dans les Actions du dépôt. Le manifeste courant est `manifest.xml` version **1.0.2.0**. Le compagnon a réussi une recherche réelle sur le Mac de développement, et l’utilisateur a confirmé le fonctionnement de l’ancienne liaison Codex sur Windows. Le nouveau compagnon en arrière-plan n’a pas encore été essayé par l’utilisateur. Le poste Windows professionnel et ses 1 740 vrais SVG n’ont pas été directement accessibles aux essais du développeur.
 
 ## Rendre cette version accessible au poste
 
-La version déjà installée pointe vers `https://azertiv.github.io/logos-ppt/taskpane.html`. Le manifeste **1.0.1.0** suffit pour cette mise à jour du compagnon ; seule une installation antérieure au raccourci Ctrl + Alt + P nécessite le [manifeste courant](https://azertiv.github.io/logos-ppt/manifest.xml). La publication GitHub Pages a été autorisée par l’utilisateur ; aucune publication Microsoft Marketplace n’a été demandée.
+La version déjà installée pointe vers `https://azertiv.github.io/logos-ppt/taskpane.html`. Les corrections web arrivent à son actualisation ; la correction du moteur partagé nécessite le [manifeste courant](https://azertiv.github.io/logos-ppt/manifest.xml), version **1.0.2.0**. Il retire `TaskpaneId`, incompatible avec la configuration recommandée du moteur partagé, et versionne l’URL du volet. La publication GitHub Pages a été autorisée par l’utilisateur ; aucune publication Microsoft Marketplace n’a été demandée.
 
 Le même identifiant de complément et la même origine web sont conservés pour préserver autant que possible les préférences et le ZIP déjà stockés. Une suppression/réinstallation, une politique d’entreprise ou l’effacement du cache Office peuvent toutefois effacer le stockage local : conserver le ZIP original avant ces manipulations.
 
@@ -26,13 +26,17 @@ Vérifier séparément le mode API avec la clé habituelle. Son compteur doit é
 
 La documentation Microsoft indique la prise en charge PowerPoint Windows à partir de Microsoft 365 **version 2601, build 19628.20150** ; le canal Monthly Enterprise requiert **2604, build 19929.20172**. Vérifier la version réelle dans Fichier → Compte → À propos de PowerPoint. Le support effectif doit être essayé sur le poste, notamment si l’entreprise contrôle les mises à jour.
 
-Mettre à jour le manifeste installé vers **1.0.1.0**, puis ouvrir une fois le complément dans la présentation. Sélectionner le texte « Supplier Questionnaire » dans une diapositive et appuyer sur **Ctrl + Alt + P**. Le volet doit afficher la recherche puis ajouter son premier pictogramme. Le texte source doit rester intact, y compris si l’option habituelle « Remplacer la sélection » est cochée.
+Mettre à jour le manifeste installé vers **1.0.2.0**, puis ouvrir une fois le complément dans la présentation. Dans **Réglages → Insertion**, vérifier l’état lu auprès de PowerPoint. Une version non compatible, une action absente, un conflit et une erreur de lecture doivent être distingués. Une ancienne combinaison personnalisée doit s’afficher telle quelle ; **Rétablir le raccourci** ne change que l’action Atelier Pictos, sur demande explicite. La simple ouverture des réglages ne modifie aucune association.
 
-Fermer le volet et répéter. Sur les versions compatibles, le moteur partagé reste chargé. L’option des réglages « Garder le raccourci disponible à la réouverture de cette présentation » permet ensuite de demander son chargement lors de la prochaine ouverture de ce document. Ce choix est propre à la présentation.
+Sélectionner le texte « Supplier Questionnaire » dans une diapositive et appuyer sur **Ctrl + Alt + P**, ou sur la combinaison réellement affichée. Le volet doit afficher la recherche puis ajouter son premier pictogramme. Le texte source doit rester intact, y compris si l’option habituelle « Remplacer la sélection » est cochée. Répéter avec le bouton **Insérer depuis la sélection** : il utilise la même lecture Office, la même recherche et les mêmes protections, sans dépendre de l’enregistrement du raccourci.
+
+Fermer le volet et répéter. Sur les versions compatibles, le moteur partagé reste chargé. L’option des réglages **Charger le complément à l’ouverture de cette présentation** permet ensuite de demander son chargement lors de la prochaine ouverture de ce document. Ce choix est propre à la présentation ; il ne rend pas compatible une version de PowerPoint qui ne l’est pas.
 
 PowerPoint peut signaler un conflit avec son raccourci existant et demander quelle action utiliser. Choisir l’action Atelier Pictos pour cet essai. Si le raccourci ne se déclenche pas, vérifier le nouveau manifeste, la version d’Office et les préférences des raccourcis de compléments avant toute autre modification.
 
-Enfin, lancer une recherche puis changer de diapositive pendant l’attente : le complément doit refuser l’insertion automatique et inviter à relancer le raccourci. Une recherche en échec, une sélection vide ou une bibliothèque absente ne doit rien insérer.
+Enfin, lancer une recherche puis changer de diapositive pendant l’attente : le complément doit refuser l’insertion automatique et inviter à relancer le raccourci. Une recherche en échec, une sélection vide ou une bibliothèque absente ne doit rien insérer. Une sélection valide reste visible dans le champ de recherche même lorsque l’insertion est bloquée par une bibliothèque absente.
+
+Le champ et son formulaire déclarent `autocomplete="off"`. Vérifier séparément les suggestions « Saved Info » dans le WebView2 réel : elles proviennent d’Edge et leur affichage ne prouve pas l’exécution de l’action du complément. Le correctif ne change pas les réglages globaux ni les données enregistrées du navigateur.
 
 ## Informations utiles si un essai échoue
 

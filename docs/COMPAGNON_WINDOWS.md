@@ -11,7 +11,7 @@ Le compagnon fonctionne discrètement près de l’horloge Windows. Il utilise v
 5. Depuis l’icône ou la page du compagnon, choisissez **Copier le code de liaison**. Dans PowerPoint : **Réglages → Recherche IA → Abonnement ChatGPT · Codex**. Collez le code et cliquez sur **Enregistrer / vérifier**.
 6. Pour retrouver le compagnon à chaque ouverture de session, cochez **Démarrer avec Windows · cet utilisateur** dans le menu de l’icône.
 
-Vous pouvez fermer la page du navigateur. La liaison est conservée dans votre profil PowerPoint et le code reste identique au prochain lancement du compagnon. La mise à jour du compagnon réutilise le dossier de connexion ChatGPT existant par défaut ; elle ne supprime pas votre bibliothèque PowerPoint. Le manifeste Office reste en version **1.0.1.0** pour **Ctrl + Alt + P**.
+Vous pouvez fermer la page du navigateur. La liaison est conservée dans votre profil PowerPoint et le code reste identique au prochain lancement du compagnon. La mise à jour du compagnon réutilise le dossier de connexion ChatGPT existant par défaut ; elle ne supprime pas votre bibliothèque PowerPoint. Le manifeste Office courant est **1.0.2.0** pour la configuration corrigée de **Ctrl + Alt + P**. Le raccourci dépend de la version de PowerPoint ; il ne dépend pas du compagnon. Le bouton **Insérer depuis la sélection** reste disponible dans le volet.
 
 ## Au quotidien
 

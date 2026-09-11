@@ -1,6 +1,6 @@
 {
   "name": "logos-ppt",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Office.js PowerPoint add-in to browse and insert pictogram logos.",
   "scripts": {

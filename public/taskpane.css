@@ -64,7 +64,9 @@ h1 { margin: 0; font-size: clamp(13px, 4.5vw, 17px); font-weight: 600; letter-sp
 .count-bubble { display: inline-flex; align-items: center; min-height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 99px; background: #fff; font-size: 11px; font-weight: 600; white-space: nowrap; }
 .dock-density { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 6px 8px; border-radius: 99px; background: #fff; font-size: 11px; }
 .dock-density input { width: 100%; min-width: 0; margin: 0; accent-color: var(--accent); }
-.search { min-width: 0; }
+.search { min-width: 0; margin: 0; }
+.selection-action { grid-column: 1 / -1; justify-self: start; padding: 4px 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 11px; font-weight: 400; }
+.selection-action:hover { color: var(--ink); text-decoration: underline; }
 .search-field { display: flex; align-items: center; min-width: 0; gap: 6px; padding: 3px; border: 1px solid #d3bee8; border-radius: 14px; background: #fff; }
 .search-field:focus-within { border-color: #9c76bc; box-shadow: 0 0 0 2px rgba(156,118,188,.12); }
 .search-field input { flex: 1 1 0; width: 0; min-width: 0; padding: 10px 8px; border: 0; outline: none; background: transparent; font-size: 12px; }
@@ -106,6 +108,8 @@ h1 { margin: 0; font-size: clamp(13px, 4.5vw, 17px); font-weight: 600; letter-sp
 .checkbox input { flex: 0 0 15px; width: 15px; height: 15px; margin: 2px 0; accent-color: var(--accent); }
 .shortcut-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 16px 0; padding: 14px 0; border-block: 1px solid var(--border); font-size: 12px; }
 .shortcut-row > span { flex: 1 1 100%; }
+.shortcut-row > .settings-meta, .shortcut-row > .settings-actions, .shortcut-row > a { flex: 1 1 100%; margin-top: 0; }
+.shortcut-row > a { color: var(--accent); font-size: 11px; }
 kbd { border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; background: #f7f6f4; font-family: inherit; font-size: 12px; }
 .shortcut-row .info-tip { margin-left: auto; }
 .info-tip { position: relative; flex: 0 0 auto; font-size: 12px; }
@@ -128,11 +132,12 @@ kbd { border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; bac
 .zip-meta { margin-top: 10px; color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
 @keyframes spinRing { to { transform: rotate(360deg); } }
 @media (max-width:560px) {
-  .search-dock-inner { grid-template-columns: auto minmax(32px,1fr) 36px; grid-template-areas: "count density refresh" "search search search"; gap: 8px; }
+  .search-dock-inner { grid-template-columns: auto minmax(32px,1fr) 36px; grid-template-areas: "count density refresh" "search search search" "selection selection selection"; gap: 8px; }
   .count-bubble { grid-area: count; }
   .dock-density { grid-area: density; }
   .refresh-round { grid-area: refresh; }
   .search { grid-area: search; }
+  .selection-action { grid-area: selection; }
   .controls { grid-template-columns: 1fr; }
 }
 @media (max-width:280px) {
