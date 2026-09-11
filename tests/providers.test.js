@@ -31,3 +31,13 @@ test("bounded task contract validates IDs, sizes and structured responses", () =
   assert.throws(() => tasks.validate(input, { ordered_ids: [4, 4], note: "" }));
   assert.deepEqual(tasks.validate(input, { ordered_ids: [], note: "No match" }), { ordered_ids: [], note: "No match" });
 });
+
+test('connection monitoring remains compatible with the previous console companion', async () => {
+  const paths=[];
+  const client=new CodexClient({token:'a'.repeat(64),fetchImpl:async url=>{
+    paths.push(new URL(url).pathname);
+    return url.endsWith('/connection') ? new Response(JSON.stringify({error:'Unknown route'}),{status:404}) : new Response(JSON.stringify({connected:true}));
+  }});
+  assert.equal((await client.connection()).connected,true);
+  assert.deepEqual(paths,['/v1/connection','/v1/status']);
+});

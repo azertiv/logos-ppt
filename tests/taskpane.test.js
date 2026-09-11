@@ -5,10 +5,10 @@ const fs = require("node:fs");
 const path = require("node:path");
 const tasks = require("../public/ai-tasks");
 
-function setup() {
-  const nodes = new Map(), storage = new Map();
+function setup(existingStorage = new Map()) {
+  const nodes = new Map(), storage = existingStorage;
   const node = id => {
-    if (!nodes.has(id)) nodes.set(id, { value: "", textContent: "", classList: { toggle() {} }, setAttribute() {}, addEventListener() {}, replaceChildren() {}, add() {} });
+    if (!nodes.has(id)) nodes.set(id, { value: "", textContent: "", dataset: {}, classList: { toggle() {} }, setAttribute() {}, addEventListener() {}, replaceChildren() {}, add() {} });
     return nodes.get(id);
   };
   const context = vm.createContext({ document: { getElementById: node }, Office: { onReady() {} }, window: { localStorage: { getItem: k => storage.get(k), setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k) } }, console, AbortController, Map, Set, Intl, crypto: { randomUUID: () => "test" }, PictosAiTasks: tasks });
@@ -211,4 +211,51 @@ test("preview loading observes the library viewport", () => {
   context.IntersectionObserver = class { constructor(callback, config) { options = config; } };
   run('getLazyObserver()');
   assert.equal(options.root, node('library-scroll'));
+});
+
+function connectionSetup(storage) {
+  const result=setup(storage), {run,context,node}=result;
+  context.setTimeout=()=>1;context.clearTimeout=()=>{};context.Option=class {constructor(name,id){this.text=name;this.value=id;}};
+  context.reply={connected:true,models:[{id:'luna'}],limits:null}; context.failure=null; context.reads=0; context.searches=0;
+  run('PictosAiProviders={DEFAULT_URL:"http://127.0.0.1:43129",formatLimits:()=>"",CodexClient:class {constructor({url}){this.url=url;} async status(){reads++;if(failure)throw failure;return reply;} async connection(){reads++;if(failure)throw failure;return {connected:reply.connected};} search(){searches++;}}};aiProvider="codex";aiEnabled=true;');
+  node('ai-codex-url').value='http://127.0.0.1:43129';node('ai-codex-token').value='a'.repeat(64);
+  return result;
+}
+
+test('a verified pairing survives a new PowerPoint session', async () => {
+  const first=connectionSetup();await first.run('checkCodexConnection({full:true})');
+  assert.equal(first.storage.get('logosPptCodexToken'),'a'.repeat(64));
+  const reopened=connectionSetup(first.storage);reopened.node('ai-codex-token').value='';
+  reopened.run('restorePreferences()');
+  assert.equal(reopened.node('ai-codex-token').value,'a'.repeat(64));
+});
+
+test('status checks preserve pending searches, deduplicate reads and recover after a restart', async () => {
+  const {run,context,storage}=connectionSetup();
+  run('aiRequestController=new AbortController()'); const signal=run('aiRequestController.signal');
+  const first=run('checkCodexConnection({full:true})'),second=run('checkCodexConnection({full:true})');
+  assert.equal(first,second);await first;
+  assert.equal(context.reads,1);assert.equal(signal.aborted,false);
+  context.failure=Object.assign(new Error('Compagnon arrêté'),{code:'COMPANION_OFFLINE'});
+  await run('checkCodexConnection({silent:true})');assert.equal(run('codexConnectionState'),'offline');
+  assert.equal(storage.get('logosPptCodexToken'),'a'.repeat(64));
+  context.failure=null;await run('checkCodexConnection({silent:true})');
+  assert.equal(run('codexConnectionState'),'ready');assert.equal(run('codexReady'),true);
+  assert.equal(context.searches,0);assert.equal(signal.aborted,false);
+});
+
+test('a wrong pairing code is distinguished from an account awaiting login', async () => {
+  const {run,context}=connectionSetup();
+  context.failure=Object.assign(new Error('Code incorrect'),{code:'PAIRING_REQUIRED'});
+  await run('checkCodexConnection({full:true})');assert.equal(run('codexConnectionState'),'unpaired');
+  context.failure=null;context.reply={connected:false,models:[]};
+  await run('checkCodexConnection({full:true})');assert.equal(run('codexConnectionState'),'login');assert.equal(run('codexReady'),false);
+});
+
+test('blocked Office storage is reported without disabling the current connection', async () => {
+  const {run,context}=connectionSetup();
+  context.window.localStorage.setItem=()=>{throw new Error('Storage blocked');};
+  await run('checkCodexConnection({full:true})');
+  assert.equal(run('codexReady'),true);
+  assert.match(run('codexConnectionMessage'),/pas pu mémoriser/);
 });

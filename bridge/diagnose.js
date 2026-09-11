@@ -24,7 +24,7 @@ async function main() {
     report.chatgptConnected = state.connected;
     report.availableModels = state.models.map(m => m.id);
     if (report.inferenceRequested) {
-      if (!state.connected) throw new Error("Ouvrez Demarrer.cmd, connectez ChatGPT dans le navigateur, puis relancez Test-Recherche.cmd.");
+      if (!state.connected) throw new Error("Ouvrez Neurow.Pictos.exe, connectez ChatGPT depuis le menu de son icône, puis relancez ce diagnostic.");
       const start = Date.now();
       const expansion = await client.search({ task: "expand", query: "ambition" });
       const p = expansion.parsed;

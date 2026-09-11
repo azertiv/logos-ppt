@@ -50,6 +50,12 @@ let codexReady = false;
 let codexClient = null;
 let codexModel = "";
 let codexConnectionVersion = 0;
+let codexConnectionState = "unpaired";
+let codexConnectionMessage = "";
+let codexCheckPromise = null;
+let codexCheckController = null;
+let codexConnectionTimer = null;
+let codexPairingDirty = false;
 let aiRequestController = null;
 let localLogosCache = null;
 let localZipRecord = null;
@@ -102,6 +108,7 @@ const STORAGE_KEYS = {
   aiProvider: "logosPptAiProvider",
   codexUrl: "logosPptCodexUrl",
   codexModel: "logosPptCodexModel",
+  codexToken: "logosPptCodexToken",
   aiSearchCache: "logosPptAiSearchCache",
   aiAnonId: "logosPptAiAnonId",
   aiUsage: "logosPptAiUsage"
@@ -280,7 +287,10 @@ function restorePreferences() {
   document.getElementById("ai-provider").value = aiProvider;
   document.getElementById("ai-codex-url").value = safeStorageGet(STORAGE_KEYS.codexUrl) || PictosAiProviders.DEFAULT_URL;
   codexModel = safeStorageGet(STORAGE_KEYS.codexModel) || "";
-  try { document.getElementById("ai-codex-token").value = sessionStorage.getItem("logosPptCodexToken") || ""; } catch {}
+  let savedToken = safeStorageGet(STORAGE_KEYS.codexToken) || "";
+  try { savedToken ||= sessionStorage.getItem(STORAGE_KEYS.codexToken) || ""; } catch {}
+  document.getElementById("ai-codex-token").value = savedToken;
+  if (savedToken) safeStorageSet(STORAGE_KEYS.codexToken, savedToken);
   const storedAiEnabled = safeStorageGet(STORAGE_KEYS.aiEnabled);
   aiEnabled = storedAiEnabled === "1";
   aiApiKey = safeStorageGet(STORAGE_KEYS.aiApiKey) || "";
@@ -334,10 +344,11 @@ function safeStorageGet(key) {
 
 function safeStorageSet(key, value) {
   try {
-    if (!window.localStorage) return;
+    if (!window.localStorage) return false;
     window.localStorage.setItem(key, value);
+    return true;
   } catch (error) {
-    // Ignore storage errors (private mode, quota).
+    return false;
   }
 }
 
@@ -403,7 +414,7 @@ function isAiProviderReady() {
 }
 
 function providerWarning() {
-  return aiProvider === "codex" ? "Vérifiez la connexion au compagnon Codex dans Réglages." : AI_KEY_WARNING_MESSAGE;
+  return aiProvider === "codex" ? codexConnectionMessage || "Reliez le compagnon Codex dans Réglages." : AI_KEY_WARNING_MESSAGE;
 }
 
 function syncProviderPanels() {
@@ -411,6 +422,7 @@ function syncProviderPanels() {
   document.getElementById("ai-api-settings").classList.toggle("hidden", codex);
   document.getElementById("ai-api-usage").classList.toggle("hidden", codex);
   document.getElementById("ai-codex-settings").classList.toggle("hidden", !codex);
+  syncCodexConnectionBadge();
 }
 
 function initProviderControls() {
@@ -426,11 +438,18 @@ function initProviderControls() {
     syncAiToggle();
     syncAiSettingsStatus();
     scheduleSearch({ immediate: true });
+    if (aiProvider === "codex") checkCodexConnection({ silent: true, full: true });
+    else { codexConnectionVersion++; clearTimeout(codexConnectionTimer); codexCheckController?.abort(); codexCheckPromise = null; document.getElementById("ai-codex-connect").disabled = false; }
   });
   for (const input of [urlInput, tokenInput]) input.addEventListener("input", () => {
     codexConnectionVersion++;
+    codexCheckController?.abort(); codexCheckPromise = null;
+    document.getElementById("ai-codex-connect").disabled = false;
+    codexPairingDirty = true;
+    clearTimeout(codexConnectionTimer);
     codexReady = false;
     if (aiProvider === "codex") clearAiSearchState();
+    setCodexConnectionState("unpaired", "Enregistrez le code pour conserver la liaison avec ce compagnon.");
     syncAiToggle();
     syncAiSettingsStatus();
   });
@@ -441,50 +460,116 @@ function initProviderControls() {
     syncAiSettingsStatus();
     scheduleSearch({ immediate: true });
   });
-  document.getElementById("ai-codex-connect").addEventListener("click", checkCodexConnection);
-  document.getElementById("ai-codex-open").addEventListener("click", () => {
+  document.getElementById("ai-codex-connect").addEventListener("click", () => checkCodexConnection({ full: true }));
+  document.getElementById("ai-codex-forget").addEventListener("click", () => {
+    codexConnectionVersion++; codexCheckController?.abort(); codexCheckPromise = null;
+    document.getElementById("ai-codex-connect").disabled = false;
+    clearTimeout(codexConnectionTimer); codexReady = false; codexClient = null; codexPairingDirty = false;
+    tokenInput.value = ""; safeStorageRemove(STORAGE_KEYS.codexToken);
+    try { sessionStorage.removeItem(STORAGE_KEYS.codexToken); } catch {}
+    if (aiProvider === "codex") clearAiSearchState();
+    setCodexConnectionState("unpaired", "Liaison oubliée sur ce profil PowerPoint."); syncAiToggle();
+  });
+  document.getElementById("ai-codex-open").addEventListener("click", async () => {
+    let target;
     try {
       const url = PictosAiProviders.localUrl(urlInput.value.trim());
       const token = tokenInput.value.trim();
-      const fragment = /^[a-f0-9]{64}$/.test(token) ? `#${token}` : "";
-      window.open(`${url}/${fragment}`, "_blank", "noopener,noreferrer");
-    } catch (error) { syncAiSettingsStatus(error.message); }
+      target = window.open("about:blank", "_blank");
+      if (target) target.opener = null;
+      let destination = `${url}/`;
+      if (/^[a-f0-9]{64}$/.test(token)) {
+        try {
+          const result = await new PictosAiProviders.CodexClient({ url, token }).call("dashboard-ticket", {});
+          if (!/^[a-f0-9]{48}$/.test(result.ticket || "")) throw new Error("Lien du compagnon invalide.");
+          destination += `#link=${result.ticket}`;
+        } catch (error) {
+          if (error.code !== "HTTP_404") throw error;
+          destination += `#${token}`; // Compatibility with the previous console companion.
+        }
+      }
+      if (target) target.location.href = destination;
+      else syncAiSettingsStatus("Ouvrez la liaison depuis l’icône du compagnon près de l’horloge Windows.");
+    } catch (error) { target?.close(); syncAiSettingsStatus(error.message); }
   });
   syncProviderPanels();
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) clearTimeout(codexConnectionTimer);
+    else if (aiProvider === "codex" && !codexPairingDirty) checkCodexConnection({ silent: true });
+  });
+  window.addEventListener("focus", () => {
+    if (aiProvider === "codex" && !codexPairingDirty) checkCodexConnection({ silent: true });
+  });
+  if (aiProvider === "codex" && tokenInput.value) checkCodexConnection({ silent: true, full: true });
 }
 
-async function checkCodexConnection() {
-  const button = document.getElementById("ai-codex-connect");
+function setCodexConnectionState(state, message = "") {
+  codexConnectionState = state;
+  codexConnectionMessage = message;
+  if (state !== "ready") codexReady = false;
+  syncCodexConnectionBadge();
+  syncAiSettingsStatus();
+}
+
+function syncCodexConnectionBadge() {
+  const badge = document.getElementById("codex-connection-badge");
+  if (!badge) return;
+  badge.classList.toggle("hidden", aiProvider !== "codex");
+  badge.dataset.state = codexConnectionState;
+  badge.textContent = ({ ready: "Codex connecté", checking: "Connexion…", offline: "Compagnon indisponible", login: "ChatGPT à connecter", unpaired: "Liaison à configurer", error: "Connexion à vérifier" })[codexConnectionState] || "Connexion à vérifier";
+  badge.title = codexConnectionMessage || badge.textContent;
+}
+
+function scheduleCodexConnectionCheck() {
+  clearTimeout(codexConnectionTimer);
+  if (document.hidden || aiProvider !== "codex" || codexPairingDirty || codexConnectionState === "unpaired") return;
+  codexConnectionTimer = setTimeout(() => checkCodexConnection({ silent: true }), codexConnectionState === "login" ? 5000 : 30000);
+}
+
+function checkCodexConnection({ silent = false, full = false } = {}) {
+  if (silent && codexPairingDirty) return Promise.resolve();
+  if (codexCheckPromise) return codexCheckPromise;
   const version = ++codexConnectionVersion;
-  codexReady = false;
-  if (aiProvider === "codex") clearAiSearchState();
-  button.disabled = true;
-  syncAiSettingsStatus("Vérification du compagnon et du compte ChatGPT…");
+  const controller = new AbortController(); codexCheckController = controller;
+  const promise = performCodexConnectionCheck({ silent, full, version, controller });
+  codexCheckPromise = promise;
+  promise.finally(() => { if (codexCheckPromise === promise) codexCheckPromise = null; });
+  return promise;
+}
+
+async function performCodexConnectionCheck({ silent, full, version, controller }) {
+  const button = document.getElementById("ai-codex-connect");
+  if (!silent || !codexReady) { button.disabled = true; setCodexConnectionState("checking", "Vérification du compagnon et de ChatGPT…"); }
   try {
     const url = document.getElementById("ai-codex-url").value.trim();
     const token = document.getElementById("ai-codex-token").value.trim();
     const client = new PictosAiProviders.CodexClient({ url, token });
-    const state = await client.status();
+    let state = full ? await client.status(controller.signal) : await client.connection(controller.signal);
+    if (state.connected && !state.models && !codexReady) state = await client.status(controller.signal);
     if (version !== codexConnectionVersion) return;
     codexClient = client;
-    safeStorageSet(STORAGE_KEYS.codexUrl, client.url);
-    try { sessionStorage.setItem("logosPptCodexToken", token); } catch {}
-    document.getElementById("ai-codex-limits").textContent = PictosAiProviders.formatLimits(state.limits);
-    const select = document.getElementById("ai-codex-model");
-    select.replaceChildren();
-    for (const model of state.models || []) select.add(new Option(model.name || model.id, model.id));
-    codexModel = state.models?.find(m => m.id === codexModel)?.id || state.models?.find(m => /luna|mini|nano|spark/i.test(m.id))?.id || state.models?.find(m => m.isDefault)?.id || state.models?.[0]?.id || "";
-    select.value = codexModel;
-    safeStorageSet(STORAGE_KEYS.codexModel, codexModel);
+    codexPairingDirty = false;
+    const urlSaved = safeStorageSet(STORAGE_KEYS.codexUrl, client.url);
+    const tokenSaved = safeStorageSet(STORAGE_KEYS.codexToken, token);
+    const remembered = urlSaved && tokenSaved;
+    try { if (remembered) sessionStorage.removeItem(STORAGE_KEYS.codexToken); else sessionStorage.setItem(STORAGE_KEYS.codexToken, token); } catch {}
+    if (state.models) {
+      document.getElementById("ai-codex-limits").textContent = PictosAiProviders.formatLimits(state.limits);
+      const select = document.getElementById("ai-codex-model"); select.replaceChildren();
+      for (const model of state.models) select.add(new Option(model.name || model.id, model.id));
+      codexModel = state.models.find(m => m.id === codexModel)?.id || state.models.find(m => /luna|mini|nano|spark/i.test(m.id))?.id || state.models.find(m => m.isDefault)?.id || state.models[0]?.id || "";
+      select.value = codexModel; safeStorageSet(STORAGE_KEYS.codexModel, codexModel);
+    }
     codexReady = Boolean(state.connected && codexModel);
-    syncAiSettingsStatus(codexReady ? `Codex connecté · ${codexModel}.` : "Compagnon accessible. Ouvrez-le pour connecter ChatGPT, puis vérifiez à nouveau.");
+    setCodexConnectionState(codexReady ? "ready" : state.connected ? "error" : "login", codexReady ? remembered ? `Codex connecté · ${codexModel}. Liaison mémorisée.` : "Codex connecté pour cette session. Office n’a pas pu mémoriser la liaison." : state.connected ? "Aucun modèle disponible. Actualisez la connexion." : "Compagnon ouvert. Connectez ChatGPT depuis son icône ; la liaison sera actualisée automatiquement.");
     clearAiStatusWarningIfConfigured();
-    if (aiProvider === "codex") scheduleSearch({ immediate: true });
   } catch (error) {
-    if (version === codexConnectionVersion) syncAiSettingsStatus(error.message);
+    if (version === codexConnectionVersion && error.name !== "AbortError") {
+      const state = error.code === "PAIRING_REQUIRED" ? "unpaired" : error.code === "COMPANION_OFFLINE" || error.code === "SERVICE_TIMEOUT" ? "offline" : error.code === "LOGIN_REQUIRED" ? "login" : "error";
+      setCodexConnectionState(state, error.message);
+    }
   } finally {
-    button.disabled = false;
-    syncAiToggle();
+    if (version === codexConnectionVersion) { button.disabled = false; syncAiToggle(); scheduleCodexConnectionCheck(); }
   }
 }
 
@@ -576,7 +661,7 @@ function syncAiSettingsStatus(message = "") {
     return;
   }
   if (aiProvider === "codex") {
-    aiSettingsStatus.textContent = codexReady ? `Codex prêt · ${codexModel}. Activez le bouton AI pour rechercher.` : "Vérifiez la connexion au compagnon pour activer Codex.";
+    aiSettingsStatus.textContent = codexConnectionMessage || (codexReady ? `Codex prêt · ${codexModel}.` : "Collez le code de liaison du compagnon pour connecter PowerPoint.");
     return;
   }
   if (!aiApiKey) {
@@ -1333,6 +1418,10 @@ async function performAiSearch(query) {
   } catch (error) {
     if (requestId !== aiSearchState.requestId) {
       return;
+    }
+    if (context.provider === "codex" && ["COMPANION_OFFLINE", "SERVICE_TIMEOUT", "PAIRING_REQUIRED", "LOGIN_REQUIRED"].includes(error.code)) {
+      setCodexConnectionState(error.code === "PAIRING_REQUIRED" ? "unpaired" : error.code === "LOGIN_REQUIRED" ? "login" : "offline", error.message);
+      scheduleCodexConnectionCheck();
     }
     aiSearchState = {
       query,

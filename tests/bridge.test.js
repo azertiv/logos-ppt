@@ -10,12 +10,12 @@ const { CodexService } = require("../bridge/codex-service");
 const { createBridge, runtimeOptions } = require("../bridge/server");
 const { CodexClient } = require("../public/ai-providers");
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function fixture(t, { account = "chatgpt", timeoutMs = 3000 } = {}) {
+async function fixture(t, { account = "chatgpt", timeoutMs = 3000, bridgeOptions = {} } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pictos-test-"));
   const trace = path.join(dir, "trace.jsonl");
   const rpc = new CodexRpc({ executable: process.execPath, args: [path.join(__dirname, "fixtures/fake-codex.js")], cwd: dir, env: { ...process.env, PICTOS_TEST_ACCOUNT: account, PICTOS_TEST_TRACE: trace }, timeoutMs: 1000 });
   const service = new CodexService(rpc, { cwd: dir, timeoutMs });
-  const bridge = createBridge({ service, port: 0 });
+  const bridge = createBridge({ ...bridgeOptions, service, port: 0 });
   const url = await bridge.listen();
   t.after(async () => { await bridge.close(); await delay(30); fs.rmSync(dir, { recursive: true, force: true }); });
   return { rpc, service, bridge, url, client: new CodexClient({ url, token: bridge.token }), trace: () => fs.existsSync(trace) ? fs.readFileSync(trace, "utf8").trim().split("\n").map(JSON.parse) : [] };
@@ -121,4 +121,39 @@ test("runtime isolates Codex configuration, excludes API secrets and selects une
   const options = runtimeOptions({ PICTOS_DATA_DIR: dir, OPENAI_API_KEY: "not-a-real-key", CODEX_HOME: "/should-not-use", PATH: "/bin", PICTOS_CODEX_PATH: "/with spaces/codex" });
   assert.equal(options.executable, "/with spaces/codex"); assert.equal(options.env.OPENAI_API_KEY, undefined); assert.equal(options.env.CODEX_HOME, path.join(dir, "codex"));
   assert.ok(options.args.includes('windows.sandbox="unelevated"')); assert.ok(options.args.includes('forced_login_method="chatgpt"'));
+});
+
+test("connection monitoring shares account reads without fetching models, quotas or inference", async t => {
+  const f = await fixture(t);
+  const results = await Promise.all([f.client.connection(), f.client.connection()]);
+  assert.ok(results.every(state => state.connected));
+  await f.client.connection();
+  assert.equal(f.trace().filter(message => message.method === 'account/read').length, 1);
+  assert.ok(!f.trace().some(message => ['model/list','account/rateLimits/read','turn/start'].includes(message.method)));
+  await f.client.call('logout', {});
+  assert.equal((await f.client.connection()).connected, false);
+});
+
+test("dashboard tickets require authentication and can only be redeemed once from the local page", async t => {
+  const f = await fixture(t, {bridgeOptions:{pairingPersistent:true}});
+  assert.equal((await fetch(f.url+'/v1/dashboard-ticket',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).status,401);
+  const {ticket} = await f.client.call('dashboard-ticket',{});
+  assert.match(ticket,/^[a-f0-9]{48}$/); assert.notEqual(ticket,f.bridge.token);
+  const redeem = origin => fetch(f.url+'/dashboard/session',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({ticket})});
+  assert.equal((await redeem('https://azertiv.github.io')).status,403);
+  const result = await redeem(f.url); assert.equal(result.status,200); assert.equal((await result.json()).token,f.bridge.token);
+  assert.equal((await redeem(f.url)).status,401);
+  assert.equal(f.trace().length,0,'opening the dashboard never starts Codex or uses quota');
+  assert.equal((await f.client.connection()).pairingPersistent,true);
+});
+
+test("dashboard tickets expire and their in-memory count is bounded", async t => {
+  let now=100000;
+  const f=await fixture(t,{bridgeOptions:{clock:()=>now}});
+  const redeem=ticket=>fetch(f.url+'/dashboard/session',{method:'POST',headers:{Origin:f.url,'Content-Type':'application/json'},body:JSON.stringify({ticket})});
+  const first=(await f.client.call('dashboard-ticket',{})).ticket;
+  now+=60000; assert.equal((await redeem(first)).status,401);
+  const oldest=(await f.client.call('dashboard-ticket',{})).ticket;
+  for(let i=0;i<8;i++)await f.client.call('dashboard-ticket',{});
+  assert.equal((await redeem(oldest)).status,401);
 });

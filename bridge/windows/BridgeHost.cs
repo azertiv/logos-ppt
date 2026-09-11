@@ -14,7 +14,10 @@ namespace Neurow.Pictos
         private SafeJobHandle job;
         internal event Action<string> Output;
         internal event Action Exited;
-        internal bool Running => process != null && !process.HasExited;
+        internal bool Running
+        {
+            get { var current = process; try { return current != null && !current.HasExited; } catch (InvalidOperationException) { return false; } }
+        }
         internal Process Process => process;
         internal void Start(string root, string directory, string token)
         {

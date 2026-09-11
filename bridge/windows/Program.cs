@@ -47,7 +47,7 @@ namespace Neurow.Pictos
         private const string BaseUrl = "http://127.0.0.1:43129";
         private readonly string executable = Assembly.GetExecutingAssembly().Location;
         private readonly string root = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-        private readonly string directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AtelierPictos");
+        private readonly string directory = Path.GetFullPath(Environment.GetEnvironmentVariable("PICTOS_DATA_DIR") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AtelierPictos"));
         private readonly Control dispatcher = new Control();
         private readonly NotifyIcon tray;
         private readonly ContextMenuStrip menu = new ContextMenuStrip();
@@ -146,7 +146,7 @@ namespace Neurow.Pictos
                 timer.Interval = pending ? 3000 : 30000;
                 SetStatus(online ? (Flag(state, "busy") ? "Recherche en cours" : "Connecté à ChatGPT") : pending ? "Connexion ChatGPT en cours…" : "ChatGPT à connecter", online ? connected : waiting);
             }
-            catch { if (current == generation && !quitting) SetStatus("Connexion à vérifier · ouvrez la liaison", failed); }
+            catch { if (current == generation && !quitting) { timer.Interval = 30000; SetStatus("Connexion à vérifier · ouvrez la liaison", failed); } }
             finally { polling = false; }
         }
         private async Task<Dictionary<string, object>> RequestAsync(string route, string body = null)

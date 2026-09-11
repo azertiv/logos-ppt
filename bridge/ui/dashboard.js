@@ -1,106 +1,109 @@
 /* global PictosAiProviders */
 "use strict";
 const $ = id => document.getElementById(id);
-let client, loginTimer, loginDeadline = 0, activeSearch, refreshing = false;
-let token = location.hash.slice(1);
-try { token ||= sessionStorage.getItem("pictosPairing") || ""; } catch {}
+let client = null, token = "", state = null, timer, refreshing = false, acting = false;
+let loginDeadline = 0;
+const fragment = location.hash.slice(1);
 history.replaceState(null, "", location.pathname);
-$("token").value = token;
-$("address").textContent = location.origin;
-const demoCandidates = [
-  { id: 1, label: "Sommet", keywords: ["mountain", "peak", "climb"] },
-  { id: 2, label: "Cible", keywords: ["target", "goal", "focus"] },
-  { id: 3, label: "Fusée", keywords: ["rocket", "launch", "growth"] },
-  { id: 4, label: "Trophée", keywords: ["trophy", "win", "achievement"] },
-  { id: 5, label: "Équipe", keywords: ["team", "people", "together"] },
-  { id: 6, label: "Ampoule", keywords: ["idea", "lightbulb", "innovation"] },
-  { id: 7, label: "Feuille", keywords: ["leaf", "nature", "sustainability"] },
-  { id: 8, label: "Bouclier", keywords: ["shield", "security", "protection"] },
-  { id: 9, label: "Chien", keywords: ["dog", "animal", "pet"] },
-  { id: 10, label: "Horloge", keywords: ["clock", "time", "deadline"] }
-];
+
 function notice(message, error = false) { $("notice").textContent = message; $("notice").classList.toggle("error", error); }
-function pair() {
-  token = $("token").value.trim();
-  client = new PictosAiProviders.CodexClient({ url: location.origin, token });
-  try { sessionStorage.setItem("pictosPairing", token); } catch {}
+function setToken(value) {
+  token = /^[a-f0-9]{64}$/.test(value || "") ? value : "";
+  client = token ? new PictosAiProviders.CodexClient({ url: location.origin, token }) : null;
+  $("token").value = token;
+  try { token ? sessionStorage.setItem("pictosPairing", token) : sessionStorage.removeItem("pictosPairing"); } catch {}
+  syncButtons();
+}
+function syncButtons() {
+  $("copy").disabled = !token || acting;
+  $("login").disabled = !client || acting;
+  $("device-login").disabled = !client || acting;
+  $("cancel-login").disabled = acting;
+  $("refresh").disabled = acting || refreshing;
+  $("pair").disabled = acting;
+  $("login").hidden = Boolean(state?.connected);
+  $("logout").hidden = !state?.connected;
+  $("logout").disabled = acting;
+  $("device-login").hidden = Boolean(state?.connected);
+  $("manual-pairing").hidden = Boolean(client);
+}
+function scheduleRefresh() {
+  clearTimeout(timer);
+  if (!client || document.hidden) return;
+  const pending = state?.login?.pending && Date.now() < loginDeadline;
+  timer = setTimeout(refresh, pending ? 2500 : 30000);
+}
+function showLogin(login) {
+  const raw = login.authUrl || login.verificationUrl;
+  let url;
+  try { url = new URL(raw); } catch { throw new Error("Lien de connexion indisponible. Réessayez."); }
+  if (url.protocol !== "https:" || !["auth.openai.com", "chatgpt.com", "auth.chatgpt.com"].includes(url.hostname)) throw new Error("Lien de connexion ChatGPT inattendu.");
+  $("auth-link").href = url.href;
+  $("device-code").textContent = login.userCode || "";
+  $("login-flow").hidden = false;
+  loginDeadline ||= Date.now() + 10 * 60 * 1000;
+  return url.href;
 }
 async function refresh() {
-  if (refreshing) return;
-  refreshing = true;
+  if (refreshing || acting) return;
+  if (!client) { $("connection-title").textContent = "Ouvrez la liaison depuis l’icône du compagnon"; $("state-dot").dataset.state = "idle"; return; }
+  refreshing = true; syncButtons();
   try {
-    if (!client) pair();
-    const state = await client.status();
-    $("account").textContent = state.connected ? `Connecté${state.account.email ? ` : ${state.account.email}` : ""}${state.account.planType ? ` · ${state.account.planType}` : ""}` : "Connectez un compte ChatGPT pour utiliser son quota Codex.";
-    const previous = $("model").value;
-    $("model").replaceChildren();
-    for (const m of state.models) $("model").add(new Option(m.name || m.id, m.id));
-    if (state.models.some(m => m.id === previous)) $("model").value = previous;
-    else $("model").value = (state.models.find(m => /luna|mini|nano|spark/i.test(m.id)) || state.models.find(m => m.isDefault) || state.models[0])?.id || "";
-    $("limits").textContent = PictosAiProviders.formatLimits(state.limits);
-    $("search").disabled = !state.connected || Boolean(activeSearch);
-    $("logout").disabled = !state.connected || Boolean(activeSearch);
-    $("login").disabled = Boolean(activeSearch);
+    state = await client.connection();
+    $("connection-title").textContent = state.connected ? "ChatGPT connecté" : state.login?.pending ? "Connexion ChatGPT en cours…" : "Connectez ChatGPT";
+    $("state-dot").dataset.state = state.connected ? "ready" : "idle";
+    $("account").textContent = state.connected ? (state.account?.email || "Le compagnon est prêt pour vos recherches dans PowerPoint.") : "Utilisez le compte ChatGPT de votre abonnement.";
+    $("pairing-note").textContent = state.pairingPersistent ? "À faire une seule fois sur ce profil. Le code reste le même après redémarrage." : "La liaison sera mémorisée dans votre profil PowerPoint.";
     if (state.login?.pending) showLogin(state.login);
-    else {
-      clearTimeout(loginTimer); $("login-flow").hidden = true;
-      if (state.login?.error) notice(state.login.error, true);
-      else if (!activeSearch) notice(state.connected ? "Compagnon prêt. Vous pouvez essayer une recherche." : "Compagnon accessible. La prochaine étape est la connexion ChatGPT.");
-    }
-  } catch (error) { notice(error.message, true); $("search").disabled = true; }
-  finally { refreshing = false; }
-}
-function showLogin(result) {
-  $("login-flow").hidden = false;
-  $("auth-link").href = result.authUrl || result.verificationUrl;
-  $("device-code").textContent = result.userCode || "";
-  if (!loginDeadline) loginDeadline = Date.now() + 10 * 60 * 1000;
-  clearTimeout(loginTimer);
-  if (Date.now() < loginDeadline) loginTimer = setTimeout(refresh, 2500);
+    else { $("login-flow").hidden = true; loginDeadline = 0; }
+    notice(state.login?.error || "", Boolean(state.login?.error));
+  } catch (error) {
+    state = null; $("connection-title").textContent = "Connexion indisponible"; $("state-dot").dataset.state = "error";
+    notice(error.message, true);
+    if (error.code === "PAIRING_REQUIRED") { setToken(""); $("options").open = true; }
+  } finally { refreshing = false; syncButtons(); scheduleRefresh(); }
 }
 async function login(deviceCode) {
-  if (!client) pair();
-  notice("Préparation de la connexion…");
-  const result = await client.call("login/start", { deviceCode });
-  loginDeadline = Date.now() + 10 * 60 * 1000;
-  showLogin(result);
-  notice("Ouvrez le lien de connexion ci-dessous, puis revenez ici.");
+  // Open only in direct response to the user's click; never on application startup.
+  const authWindow = deviceCode ? null : window.open("about:blank", "_blank");
+  if (authWindow) authWindow.opener = null;
+  try {
+    const login = await client.call("login/start", { deviceCode });
+    state = { ...state, login }; loginDeadline = Date.now() + 10 * 60 * 1000;
+    const url = showLogin(login);
+    if (authWindow) authWindow.location.href = url;
+    notice(deviceCode ? "Saisissez le code sur la page de connexion ChatGPT." : "Terminez la connexion dans la page ChatGPT.");
+    $("connection-title").textContent = "Connexion ChatGPT en cours…";
+  } catch (error) { authWindow?.close(); throw error; }
 }
-function action(id, fn) { $(id).addEventListener("click", async () => { const b = $(id); b.disabled = true; try { await fn(); } catch (e) { notice(e.message, true); } finally { b.disabled = false; } }); }
-action("pair", async () => { pair(); await refresh(); });
-action("copy", async () => { await navigator.clipboard.writeText($("token").value.trim()); notice("Code copié. Collez-le dans les réglages du complément."); });
-action("refresh", refresh);
+function action(id, callback) {
+  $(id).addEventListener("click", async () => {
+    if (acting) return;
+    acting = true; syncButtons(); clearTimeout(timer);
+    try { await callback(); } catch (error) { notice(error.message, true); }
+    finally { acting = false; syncButtons(); scheduleRefresh(); }
+  });
+}
+action("pair", async () => { setToken($("token").value.trim()); state = null; acting = false; await refresh(); });
+action("copy", async () => { await navigator.clipboard.writeText(token); notice("Code copié. Collez-le dans les réglages PowerPoint."); });
+action("refresh", async () => { acting = false; await refresh(); });
 action("login", () => login(false));
 action("device-login", () => login(true));
-action("cancel-login", async () => { await client.call("login/cancel", {}); loginDeadline = 0; await refresh(); });
-action("logout", async () => { await client.call("logout", {}); await refresh(); });
-$("cancel-search").addEventListener("click", () => activeSearch?.abort());
-$("demo").addEventListener("submit", async event => {
-  event.preventDefault();
-  if (activeSearch) return;
-  activeSearch = new AbortController();
-  $("search").disabled = true; $("cancel-search").hidden = false;
-  $("results").replaceChildren(); $("concepts").textContent = ""; $("timing").textContent = "";
-  const start = performance.now();
+action("cancel-login", async () => { await client.call("login/cancel", {}); acting = false; await refresh(); });
+action("logout", async () => { await client.call("logout", {}); acting = false; await refresh(); });
+document.addEventListener("visibilitychange", () => { if (document.hidden) clearTimeout(timer); else refresh(); });
+async function init() {
   try {
-    pair();
-    const query = $("query").value.trim(), model = $("model").value, signal = activeSearch.signal;
-    notice("Recherche des concepts…");
-    const expanded = await client.search({ task: "expand", query }, model, signal);
-    const p = expanded.parsed;
-    const expansion = { coreConcepts: p.core_concepts, visualMetaphors: p.visual_metaphors, concreteObjects: p.concrete_objects, relatedKeywords: p.related_keywords };
-    $("concepts").textContent = `Concepts proposés : ${[...expansion.visualMetaphors, ...expansion.concreteObjects].join(", ")}`;
-    notice("Classement des pictogrammes…");
-    const ranked = await client.search({ task: "rank", query, expansion, candidates: demoCandidates }, model, signal);
-    for (const id of ranked.parsed.ordered_ids) {
-      const candidate = demoCandidates.find(c => c.id === id);
-      if (!candidate) continue;
-      const li = document.createElement("li"); li.textContent = candidate.label; $("results").append(li);
+    if (/^link=[a-f0-9]{48}$/.test(fragment)) {
+      const response = await fetch("/dashboard/session", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ticket: fragment.slice(5) }), cache: "no-store", credentials: "omit", redirect: "error" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Ouvrez à nouveau la liaison depuis l’icône du compagnon.");
+      setToken(result.token);
+    } else {
+      let saved = ""; try { saved = sessionStorage.getItem("pictosPairing") || ""; } catch {}
+      setToken(fragment || saved);
     }
-    $("timing").textContent = `${((performance.now() - start) / 1000).toFixed(1)} s · ${ranked.model} · deux opérations Codex`;
-    notice("Recherche terminée. Le compagnon et Codex ont répondu.");
-  } catch (error) { notice(error.name === "AbortError" ? "Recherche annulée." : error.message, error.name !== "AbortError"); }
-  finally { activeSearch = null; $("search").disabled = false; $("cancel-search").hidden = true; }
-});
-if (token) refresh();
-else { notice("Copiez le code de liaison depuis la fenêtre du compagnon."); $("search").disabled = true; }
+    await refresh();
+  } catch (error) { setToken(""); $("connection-title").textContent = "Ouvrez à nouveau la liaison depuis l’icône"; notice(error.message, true); }
+}
+init();

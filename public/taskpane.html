@@ -21,6 +21,7 @@
             <span class="brand-dot"></span>
             <div>
               <h1>Neurow.Pictos</h1>
+              <span id="codex-connection-badge" class="connection-badge hidden" role="status" aria-live="polite"></span>
             </div>
           </div>
           <button
@@ -104,15 +105,16 @@
               </div>
               <div id="ai-codex-settings" class="provider-fields hidden">
                 <div class="field-heading"><label for="ai-codex-token">Code de liaison</label>
-                  <details class="info-tip"><summary aria-label="Où trouver le code de liaison">i</summary><div class="info-content"><p>Lancez le compagnon sur ce PC et connectez-y ChatGPT, puis copiez son code ici. Ce code change à chaque redémarrage du compagnon.</p></div></details>
+                  <details class="info-tip"><summary aria-label="Où trouver le code de liaison">i</summary><div class="info-content"><p>Dans l’icône Neurow.Pictos près de l’horloge Windows, choisissez « Copier le code de liaison », puis collez-le ici. Avec le nouveau compagnon, le code reste le même après redémarrage et PowerPoint retrouve automatiquement la liaison.</p></div></details>
                 </div>
                 <input id="ai-codex-token" class="settings-input" type="password" autocomplete="off" spellcheck="false" placeholder="Code affiché par le compagnon" />
-                <div class="settings-actions"><button id="ai-codex-connect" class="primary" type="button">Connecter</button><button id="ai-codex-open" class="ghost" type="button">Ouvrir le compagnon</button></div>
+                <div class="settings-actions"><button id="ai-codex-connect" class="primary" type="button">Enregistrer / vérifier</button><button id="ai-codex-open" class="ghost" type="button">Ouvrir le compagnon</button></div>
                 <label class="settings-field"><span>Modèle</span><select id="ai-codex-model" class="settings-input"><option value="">Connectez le compagnon</option></select></label>
                 <details class="settings-details"><summary>Quota et connexion</summary>
                   <p id="ai-codex-limits" class="settings-meta codex-limits" aria-live="polite">Limites non disponibles.</p>
                   <label class="settings-field"><span>Adresse du compagnon</span><input id="ai-codex-url" class="settings-input" type="url" value="http://127.0.0.1:43129" spellcheck="false" /></label>
                   <p class="settings-note">Le quota est partagé avec votre compte Codex. Si le compagnon est indisponible, la recherche reste locale ; aucun appel API payant ne prend le relais.</p>
+                  <button id="ai-codex-forget" class="ghost" type="button">Oublier la liaison</button>
                 </details>
               </div>
               <p id="ai-settings-status" class="settings-meta" aria-live="polite">Ajoutez une clé API pour utiliser l’IA.</p>

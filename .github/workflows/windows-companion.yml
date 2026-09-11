@@ -34,10 +34,19 @@ jobs:
           if ($testProcess.ExitCode -ne 0) { throw 'Native tests failed.' }
       - name: Test the bridge on Windows
         run: node --test tests/*.test.js
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Package the verified Windows companion
+        run: |
+          python scripts/fetch-companion-runtimes.py
+          python scripts/package-companion.py
+      - name: Launch and restart the real packaged application
+        run: ./scripts/test-windows-launch.ps1 -ApplicationDirectory 'dist-companion/Atelier-Pictos-Codex-Windows-x64'
       - uses: actions/upload-artifact@v4
         with:
-          name: companion-native
+          name: companion-windows
+          compression-level: 0
           path: |
-            bridge/windows/bin/Release/net48/Neurow.Pictos.exe
-            bridge/windows/bin/Release/net48/Neurow.Pictos.exe.config
-            ${{ runner.temp }}/pictos-native-tests.json
+            dist-companion/*.zip
+            dist-companion/*.sha256

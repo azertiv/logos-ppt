@@ -4,7 +4,7 @@
 
 ## Rendre cette version accessible au poste
 
-La version déjà installée pointe vers `https://azertiv.github.io/logos-ppt/taskpane.html`. Une fois le workflow de publication terminé, remplacer le manifeste installé par le [nouveau manifeste téléchargeable](https://azertiv.github.io/logos-ppt/manifest.xml). La publication du site et la publication sur Microsoft Marketplace sont deux opérations distinctes. La publication GitHub Pages a été autorisée par l’utilisateur ; aucune publication Microsoft Marketplace n’a été demandée.
+La version déjà installée pointe vers `https://azertiv.github.io/logos-ppt/taskpane.html`. Le manifeste **1.0.1.0** suffit pour cette mise à jour du compagnon ; seule une installation antérieure au raccourci Ctrl + Alt + P nécessite le [manifeste courant](https://azertiv.github.io/logos-ppt/manifest.xml). La publication GitHub Pages a été autorisée par l’utilisateur ; aucune publication Microsoft Marketplace n’a été demandée.
 
 Le même identifiant de complément et la même origine web sont conservés pour préserver autant que possible les préférences et le ZIP déjà stockés. Une suppression/réinstallation, une politique d’entreprise ou l’effacement du cache Office peuvent toutefois effacer le stockage local : conserver le ZIP original avant ces manipulations.
 
@@ -36,6 +36,6 @@ Enfin, lancer une recherche puis changer de diapositive pendant l’attente : le
 
 ## Informations utiles si un essai échoue
 
-Conserver le message exact, la version complète de PowerPoint, l’étape concernée et, pour le compagnon, le diagnostic créé par `Verifier.cmd`. Ne pas partager la clé API, le code de liaison ni le dossier de connexion Codex. Les blocages de politique d’entreprise nécessitent l’intervention de l’équipe informatique ; les tests ne demandent pas de désactiver une protection.
+Conserver le message exact, la version complète de PowerPoint et l’étape concernée. Le menu de l’icône affiche aussi l’état du compagnon. Les développeurs peuvent exécuter `bridge/diagnose.js` avec le runtime Node fourni pour créer un diagnostic explicite. Ne pas partager la clé API, le code de liaison ni le dossier de connexion Codex.
 
 Références : [raccourcis Office](https://learn.microsoft.com/en-us/office/dev/add-ins/design/keyboard-shortcuts), [moteur partagé](https://learn.microsoft.com/en-us/office/dev/add-ins/develop/configure-your-add-in-to-use-a-shared-runtime), [chargement à l’ouverture](https://learn.microsoft.com/en-us/office/dev/add-ins/develop/run-code-on-document-open).

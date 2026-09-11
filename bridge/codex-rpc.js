@@ -48,7 +48,7 @@ class CodexRpc extends EventEmitter {
     child.on("exit", () => {
       if (this.child === child) this.fail(new BridgeError("Codex s’est arrêté. Réessayez pour le relancer.", "CODEX_STOPPED", 503));
     });
-    const result = await this.request("initialize", { clientInfo: { name: "atelier_pictos", title: "Atelier Pictos", version: "0.2.0" }, capabilities: { experimentalApi: false } });
+    const result = await this.request("initialize", { clientInfo: { name: "atelier_pictos", title: "Atelier Pictos", version: "1.1.0" }, capabilities: { experimentalApi: false } });
     this.write({ method: "initialized" });
     return result;
   }

@@ -1,6 +1,6 @@
 {
   "name": "logos-ppt",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "description": "Office.js PowerPoint add-in to browse and insert pictogram logos.",
   "scripts": {
@@ -13,7 +13,8 @@
     "companion": "node bridge/server.js --open",
     "companion:check": "node bridge/diagnose.js",
     "test": "node --test tests/*.test.js",
-    "package:windows": "python3 scripts/package-companion.py"
+    "package:windows": "python3 scripts/package-companion.py",
+    "build:windows": "dotnet build bridge/windows/Neurow.Pictos.csproj -c Release"
   },
   "dependencies": {
     "express": "^4.19.2",

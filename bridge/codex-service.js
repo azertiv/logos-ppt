@@ -9,9 +9,12 @@ class CodexService {
     this.login = null;
     this.models = [];
     this.completedCalls = 0;
+    this.connectionSnapshot = null;
+    this.connectionPending = null;
     rpc.on("notification", (method, params) => {
-      if (method === "account/login/completed") this.login = { pending: false, success: params.success, error: params.success ? null : "La connexion ChatGPT a échoué ou a été annulée." };
+      if (method === "account/login/completed") { this.connectionSnapshot = null; this.login = { pending: false, success: params.success, error: params.success ? null : "La connexion ChatGPT a échoué ou a été annulée." }; }
     });
+    rpc.on("stopped", () => { this.connectionSnapshot = null; });
   }
   async account() {
     await this.rpc.start();
@@ -24,8 +27,18 @@ class CodexService {
       try { limits = await this.rpc.request("account/rateLimits/read"); } catch { limitsError = "Limites temporairement indisponibles."; }
     }
     const models = account?.type === "chatgpt" ? await this.listModels() : [];
-    return { version: "0.2.0", connected: account?.type === "chatgpt", account: account ? { type: account.type, email: account.email || null, planType: account.planType || null } : null,
+    return { version: "1.1.0", connected: account?.type === "chatgpt", account: account ? { type: account.type, email: account.email || null, planType: account.planType || null } : null,
       models, limits, limitsError, login: this.login, busy: this.busy, completedCalls: this.completedCalls };
+  }
+  async connection() {
+    if (this.connectionSnapshot && Date.now() - this.connectionSnapshot.at < 2000) return { ...this.connectionSnapshot.value, busy: this.busy, login: this.login };
+    if (this.connectionPending) return this.connectionPending;
+    this.connectionPending = this.account().then(account => {
+      const value = { version: "1.1.0", connected: account?.type === "chatgpt", account: account ? { type: account.type, email: account.email || null } : null, busy: this.busy, login: this.login };
+      this.connectionSnapshot = { at: Date.now(), value };
+      return value;
+    }).finally(() => { this.connectionPending = null; });
+    return this.connectionPending;
   }
   async listModels() {
     let cursor = null;
@@ -62,6 +75,7 @@ class CodexService {
     await this.rpc.start();
     await this.cancelLogin();
     await this.rpc.request("account/logout");
+    this.connectionSnapshot = null;
     this.models = [];
     return { ok: true };
   }

@@ -15,7 +15,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  companion:
+    uses: ./.github/workflows/windows-companion.yml
   build:
+    needs: companion
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,6 +37,12 @@ jobs:
 
       - name: Build static site
         run: npm run build:pages
+
+      - name: Include the verified Windows companion
+        uses: actions/download-artifact@v4
+        with:
+          name: companion-windows
+          path: dist/companion
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

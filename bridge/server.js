@@ -8,6 +8,7 @@ const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 const { CodexRpc, BridgeError } = require("./codex-rpc.js");
 const { CodexService } = require("./codex-service.js");
+const { managedChannel } = require("./managed-runtime.js");
 const root = path.resolve(__dirname, "..");
 
 function runtimeOptions(env = process.env) {
@@ -32,7 +33,7 @@ function runtimeOptions(env = process.env) {
   return { executable, args, cwd, env: childEnv, dataDir };
 }
 
-function createBridge({ service, token = crypto.randomBytes(32).toString("hex"), port = 43129, allowedOrigins = [], tls } = {}) {
+function createBridge({ service, token = crypto.randomBytes(32).toString("hex"), port = 43129, allowedOrigins = [], tls, clock = Date.now, pairingPersistent = false } = {}) {
   const scheme = tls ? "https" : "http";
   const origins = new Set(["https://azertiv.github.io", "https://localhost:3000", ...allowedOrigins]);
   const publicFiles = new Map([
@@ -43,6 +44,7 @@ function createBridge({ service, token = crypto.randomBytes(32).toString("hex"),
   ]);
   let actualPort = port;
   const attempts = new Map();
+  const dashboardTickets = new Map();
   function json(res, status, body) { if (!res.destroyed) { res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" }); res.end(JSON.stringify(body)); } }
   async function handle(req, res) {
     res.setHeader("Cache-Control", "no-store"); res.setHeader("X-Content-Type-Options", "nosniff");
@@ -68,25 +70,44 @@ function createBridge({ service, token = crypto.randomBytes(32).toString("hex"),
       try { const content = await fs.promises.readFile(file); res.writeHead(200, { "Content-Type": type }); return res.end(content); }
       catch { return json(res, 500, { error: "Fichier du compagnon manquant." }); }
     }
-    if (req.method === "GET" && pathname === "/health") return json(res, 200, { application: "atelier-pictos", version: "0.2.0" });
+    if (req.method === "GET" && pathname === "/health") return json(res, 200, { application: "atelier-pictos", version: "1.1.0" });
+    if (req.method === "POST" && pathname === "/dashboard/session") {
+      if (!localOrigins.has(origin)) return json(res, 403, { error: "Ouvrez la liaison depuis l’icône du compagnon." });
+      if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] || "")) return json(res, 415, { error: "Un contenu JSON est requis." });
+      try {
+        const body = await readBody(req);
+        const expires = dashboardTickets.get(body?.ticket);
+        dashboardTickets.delete(body?.ticket);
+        if (!expires || clock() >= expires) return json(res, 401, { error: "Ce lien a expiré. Ouvrez à nouveau la liaison depuis l’icône du compagnon." });
+        return json(res, 200, { token });
+      } catch (error) { return json(res, error.status || 400, { error: "Lien de liaison invalide." }); }
+    }
     if (!pathname.startsWith("/v1/")) return json(res, 404, { error: "Adresse inconnue." });
     const supplied = Buffer.from(String(req.headers.authorization || ""));
     const expected = Buffer.from(`Bearer ${token}`);
-    if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return json(res, 401, { error: "Code de liaison absent ou expiré. Copiez le code de la session actuelle du compagnon.", code: "PAIRING_REQUIRED" });
+    if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return json(res, 401, { error: "Code de liaison incorrect. Copiez-le depuis l’icône du compagnon près de l’horloge.", code: "PAIRING_REQUIRED" });
     const identity = origin || "local-cli";
-    const now = Date.now();
+    const now = clock();
     const recent = (attempts.get(identity) || []).filter(t => now - t < 60000);
     if (recent.length >= 120) return json(res, 429, { error: "Trop de demandes. Réessayez dans une minute.", code: "THROTTLED" });
     recent.push(now); attempts.set(identity, recent);
     const controller = new AbortController();
     res.on("close", () => { if (!res.writableEnded) controller.abort(); });
     try {
-      if (pathname === "/v1/status" && req.method === "GET") return json(res, 200, await service.status());
+      if (pathname === "/v1/status" && req.method === "GET") return json(res, 200, { ...await service.status(), pairingPersistent });
+      if (pathname === "/v1/connection" && req.method === "GET") return json(res, 200, { ...await service.connection(), pairingPersistent });
       if (req.method !== "POST") return json(res, 405, { error: "Méthode non autorisée." });
       if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] || "")) return json(res, 415, { error: "Un contenu JSON est requis." });
       const body = await readBody(req);
       let result;
       switch (pathname) {
+        case "/v1/dashboard-ticket": {
+          for (const [ticket, expires] of dashboardTickets) if (expires <= now) dashboardTickets.delete(ticket);
+          while (dashboardTickets.size >= 8) dashboardTickets.delete(dashboardTickets.keys().next().value);
+          const ticket = crypto.randomBytes(24).toString("hex");
+          dashboardTickets.set(ticket, now + 60000);
+          result = { ticket, expiresIn: 60 }; break;
+        }
         case "/v1/login/start": result = await service.startLogin(body.deviceCode === true); break;
         case "/v1/login/cancel": result = await service.cancelLogin(); break;
         case "/v1/logout": result = await service.logout(); break;
@@ -124,27 +145,34 @@ async function readBody(req) {
 async function main() {
   if (Number(process.versions.node.split(".")[0]) < 20) throw new Error("Node.js 20 ou plus récent est requis.");
   const options = runtimeOptions();
+  const managed = process.argv.includes("--managed") ? managedChannel(process.stdin) : null;
+  const token = managed ? await managed.ready : undefined;
   const port = Number(process.env.PICTOS_PORT || 43129);
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("Port PICTOS_PORT invalide.");
   let tls;
   if (process.env.PICTOS_TLS_CERT || process.env.PICTOS_TLS_KEY) tls = { cert: fs.readFileSync(process.env.PICTOS_TLS_CERT), key: fs.readFileSync(process.env.PICTOS_TLS_KEY) };
   const service = new CodexService(new CodexRpc(options), options);
-  const bridge = createBridge({ service, port, tls, allowedOrigins: (process.env.PICTOS_ALLOWED_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean) });
+  const bridge = createBridge({ service, token, port, tls, pairingPersistent: Boolean(managed), allowedOrigins: (process.env.PICTOS_ALLOWED_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean) });
+  let closing = false;
+  const stop = async () => { if (closing) return; closing = true; await bridge.close(); if (managed) process.stdin.destroy(); };
+  managed?.once("stop", stop);
+  if (managed?.isClosed()) { await stop(); return; }
   const url = await bridge.listen();
-  console.log(`\nAtelier Pictos — compagnon Codex\n\nOuvrir : ${url}/#${bridge.token}\nCode de liaison : ${bridge.token}\n\nCette fenêtre doit rester ouverte. Ctrl+C pour arrêter.\nLa connexion ChatGPT est propre à ce compagnon. Aucun appel API payant automatique.\n`);
-  if (process.argv.includes("--open")) {
+  if (managed) console.log(JSON.stringify({ event: "ready", url, version: "1.1.0" }));
+  else console.log(`\nAtelier Pictos — mode console de développement\n\nOuvrir : ${url}/#${bridge.token}\nCode de liaison temporaire : ${bridge.token}\n\nCtrl+C pour arrêter. Sur Windows, lancez Neurow.Pictos.exe pour la liaison permanente et le fonctionnement sans fenêtre.\n`);
+  if (!managed && process.argv.includes("--open")) {
     const fullUrl = `${url}/#${bridge.token}`;
     const command = process.platform === "win32" ? "explorer.exe" : process.platform === "darwin" ? "open" : "xdg-open";
     const browser = spawn(command, [fullUrl], { shell: false, stdio: "ignore", windowsHide: true });
     browser.on("error", () => console.log("Ouvrez manuellement le lien ci-dessus dans votre navigateur."));
     browser.unref();
   }
-  let closing = false;
-  const stop = async () => { if (closing) return; closing = true; await bridge.close(); };
   process.once("SIGINT", stop); process.once("SIGTERM", stop);
 }
 if (require.main === module) main().catch(error => {
-  console.error(error.code === "EADDRINUSE" ? "Le compagnon est déjà ouvert ou le port 43129 est occupé. Fermez l’autre fenêtre ou définissez PICTOS_PORT." : error.message);
+  const message = error.code === "EADDRINUSE" ? "Le compagnon est déjà ouvert ou le port 43129 est occupé." : "Le compagnon n’a pas pu démarrer.";
+  if (process.argv.includes("--managed")) { console.error(JSON.stringify({ event: "error", code: error.code || "START_FAILED", message })); process.stdin.destroy(); }
+  else console.error(message);
   process.exitCode = 1;
 });
 module.exports = { createBridge, runtimeOptions };

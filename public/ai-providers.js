@@ -30,7 +30,7 @@
       if (!data) throw new Error("Réponse du service illisible.");
       return data;
     } catch (error) {
-      if (timedOut) throw new Error("Le service a mis trop de temps à répondre. Réessayez.");
+      if (timedOut) { const timeout = new Error("Le service a mis trop de temps à répondre. Réessayez."); timeout.code = "SERVICE_TIMEOUT"; throw timeout; }
       throw error;
     } finally {
       clearTimeout(timer);
@@ -44,7 +44,7 @@
       this.fetchImpl = fetchImpl;
     }
     async call(path, body, signal) {
-      if (!/^[a-f0-9]{64}$/.test(this.token)) throw new Error("Copiez le code de liaison affiché par le compagnon local.");
+      if (!/^[a-f0-9]{64}$/.test(this.token)) { const error = new Error("Copiez le code de liaison depuis l’icône du compagnon près de l’horloge."); error.code = "PAIRING_REQUIRED"; throw error; }
       try {
         return await request(this.url + "/v1/" + path, {
           method: body === undefined ? "GET" : "POST",
@@ -52,11 +52,15 @@
           ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal
         }, path === "search" ? 100000 : 25000, this.fetchImpl);
       } catch (error) {
-        if (error instanceof TypeError) throw new Error("Compagnon inaccessible. Lancez-le puis vérifiez son adresse. Le navigateur ou Office peut aussi bloquer l’accès au réseau local.");
+        if (error instanceof TypeError) { const offline = new Error("Compagnon inaccessible. Lancez-le depuis son icône. Si le problème persiste, vérifiez l’accès au réseau local dans Office."); offline.code = "COMPANION_OFFLINE"; throw offline; }
         throw error;
       }
     }
     status(signal) { return this.call("status", undefined, signal); }
+    async connection(signal) {
+      try { return await this.call("connection", undefined, signal); }
+      catch (error) { if (error.code === "HTTP_404") return this.status(signal); throw error; }
+    }
     search(input, model, signal) { return this.call("search", { ...input, model }, signal); }
   }
   async function apiJson({ task, model, key, user, signal, fetchImpl = globalThis.fetch }) {

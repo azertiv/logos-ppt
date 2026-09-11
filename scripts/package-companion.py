@@ -20,7 +20,10 @@ def sha(path):
 
 
 def build():
-    for info in (LOCK["node"], LOCK["codex"]):
+    launcher = ROOT / "bridge/windows/bin/Release/net48/Neurow.Pictos.exe"
+    if not launcher.exists():
+        raise SystemExit("Compilez d’abord le lanceur : dotnet build bridge/windows/Neurow.Pictos.csproj -c Release")
+    for info in (LOCK["node"], LOCK["codex"], *LOCK["licenses"]):
         archive = ROOT / ".tmp/downloads" / info["archive"]
         if not archive.exists():
             raise SystemExit(f"Archive officielle manquante : {archive}\nSource : {info['url']}")
@@ -30,7 +33,9 @@ def build():
         shutil.rmtree(PACKAGE)
     (PACKAGE / "runtime").mkdir(parents=True)
     (PACKAGE / "public").mkdir()
-    shutil.copytree(ROOT / "bridge", PACKAGE / "bridge", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(ROOT / "bridge", PACKAGE / "bridge", ignore=shutil.ignore_patterns("__pycache__", "windows"))
+    shutil.copy2(launcher, PACKAGE / "Neurow.Pictos.exe")
+    shutil.copy2(launcher.with_suffix(".exe.config"), PACKAGE / "Neurow.Pictos.exe.config")
     for name in ["ai-tasks.js", "ai-providers.js"]:
         shutil.copy2(ROOT / "public" / name, PACKAGE / "public" / name)
     with zipfile.ZipFile(ROOT / ".tmp/downloads" / LOCK["node"]["archive"]) as archive:
@@ -41,11 +46,7 @@ def build():
         for source in ["codex-x86_64-pc-windows-msvc.exe", "codex-command-runner.exe", "codex-windows-sandbox-setup.exe"]:
             target = "codex.exe" if source.startswith("codex-x86_64") else source
             (PACKAGE / "runtime" / target).write_bytes(archive.read(source))
-    for name, args in [("Demarrer.cmd", "bridge\\server.js --open"), ("Verifier.cmd", "bridge\\diagnose.js"), ("Test-Recherche.cmd", "bridge\\diagnose.js --search")]:
-        lines = ["@echo off", "setlocal", 'cd /d "%~dp0"', 'if not exist "runtime\\node.exe" (', "  echo Archive incomplete. Decompressez le dossier entier avant de lancer ce fichier.", "  pause", "  exit /b 1", ")", f'"%~dp0runtime\\node.exe" {args}', "echo.", "pause"]
-        (PACKAGE / name).write_bytes(("\r\n".join(lines) + "\r\n").encode("ascii"))
     shutil.copy2(ROOT / "docs/COMPAGNON_WINDOWS.md", PACKAGE / "LIRE-MOI.txt")
-    shutil.copy2(ROOT / "docs/TEST_POWERPOINT_WINDOWS.md", PACKAGE / "GUIDE-POWERPOINT.txt")
     shutil.copy2(ROOT / "manifest.xml", PACKAGE / "manifest.xml")
     for name in ["CODEX-LICENSE.txt", "CODEX-NOTICE.txt"]:
         shutil.copy2(ROOT / ".tmp/downloads" / name, PACKAGE / "runtime" / name)
