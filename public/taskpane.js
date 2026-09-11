@@ -1,6 +1,7 @@
 /* global Office, JSZip, PictosAiTasks, PictosAiProviders */
 
 const grid = document.getElementById("logo-grid");
+const libraryScroll = document.getElementById("library-scroll");
 const statusEl = document.getElementById("status");
 const searchInput = document.getElementById("search-input");
 const searchClear = document.getElementById("search-clear");
@@ -79,7 +80,7 @@ let aiSearchState = {
   source: "local"
 };
 let aiSearchCache = new Map();
-let scrollFrame = null;
+let gridLayoutKey = "";
 let aiUsageSummary = {
   callCount: 0,
   inputTokens: 0,
@@ -133,7 +134,6 @@ const PREVIEW_CACHE_BYTES = 16 * 1024 * 1024;
 let previewCacheBytes = 0;
 let initialization;
 let shortcutBusy = false;
-const LAZY_ROOT_MARGIN = "160px";
 const SLIDE_ID_CACHE_MS = 1000;
 const INSERT_BASE_POSITION = { left: 48, top: 48 };
 const INSERT_OFFSET_STEP = { x: 18, y: 18 };
@@ -196,13 +196,8 @@ async function init() {
     });
   }
   if (keywordToggle) {
-    keywordToggle.addEventListener("click", () => {
-      keywordFilterState =
-        keywordFilterState === "all"
-          ? "with"
-          : keywordFilterState === "with"
-            ? "without"
-            : "all";
+    keywordToggle.addEventListener("change", () => {
+      keywordFilterState = ["all", "with", "without"].includes(keywordToggle.value) ? keywordToggle.value : "all";
       persistKeywordFilter();
       syncKeywordToggle();
       scheduleSearch({ immediate: true });
@@ -241,16 +236,14 @@ async function init() {
   initZipDropzone();
   initZipSummaryToggle();
   initAiControls();
-  window.addEventListener("scroll", scheduleScrollSync, { passive: true });
-  window.addEventListener("scroll", scheduleGridWindow, { passive: true });
+  libraryScroll.addEventListener("scroll", scheduleGridWindow, { passive: true });
   window.addEventListener("resize", scheduleGridWindow, { passive: true });
-  if (typeof ResizeObserver !== "undefined") new ResizeObserver(scheduleGridWindow).observe(grid);
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(scheduleGridWindow).observe(libraryScroll);
 
   updateSearchClear();
   syncAiToggle();
   syncAiSettingsStatus();
   syncAiUsageView();
-  syncScrollState();
   await loadLogos();
 }
 
@@ -359,6 +352,11 @@ function safeStorageRemove(key) {
 
 function initSettingsPanel() {
   if (!settingsButton || !settingsPanel) return;
+  const tips = [...settingsPanel.querySelectorAll(".info-tip")];
+  for (const tip of tips) {
+    tip.addEventListener("toggle", () => { if (tip.open) for (const other of tips) if (other !== tip) other.open = false; });
+  }
+  document.addEventListener("click", event => { for (const tip of tips) if (!tip.contains(event.target)) tip.open = false; });
   document.getElementById("settings-back").addEventListener("click", () => setSettingsPanelOpen(false));
   settingsButton.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -376,7 +374,9 @@ function initSettingsPanel() {
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && settingsPanelOpen) {
-      setSettingsPanelOpen(false);
+      const tip = settingsPanel.querySelector(".info-tip[open]");
+      if (tip) { tip.open = false; tip.querySelector("summary").focus(); }
+      else setSettingsPanelOpen(false);
     }
   });
 }
@@ -384,7 +384,8 @@ function initSettingsPanel() {
 function setSettingsPanelOpen(isOpen) {
   settingsPanelOpen = Boolean(isOpen);
   document.querySelector(".search-dock").inert = settingsPanelOpen;
-  grid.inert = settingsPanelOpen;
+  libraryScroll.inert = settingsPanelOpen;
+  document.querySelector(".header").inert = settingsPanelOpen;
   document.body.classList.toggle("settings-open", settingsPanelOpen);
   if (settingsButton) {
     settingsButton.setAttribute("aria-expanded", settingsPanelOpen ? "true" : "false");
@@ -392,7 +393,7 @@ function setSettingsPanelOpen(isOpen) {
   if (settingsPanel) {
     settingsPanel.classList.toggle("hidden", !settingsPanelOpen);
     settingsPanel.setAttribute("aria-hidden", settingsPanelOpen ? "false" : "true");
-    if (settingsPanelOpen) { settingsPanel.scrollTop = 0; document.getElementById("settings-back").focus(); }
+    if (settingsPanelOpen) { document.getElementById("settings-content").scrollTop = 0; document.getElementById("settings-back").focus(); }
     else settingsButton?.focus();
   }
 }
@@ -476,7 +477,7 @@ async function checkCodexConnection() {
     select.value = codexModel;
     safeStorageSet(STORAGE_KEYS.codexModel, codexModel);
     codexReady = Boolean(state.connected && codexModel);
-    syncAiSettingsStatus(codexReady ? `Codex connecté${state.account?.email ? ` : ${state.account.email}` : ""}. Activez le bouton AI pour rechercher.` : "Compagnon accessible. Ouvrez-le pour connecter ChatGPT, puis vérifiez à nouveau.");
+    syncAiSettingsStatus(codexReady ? `Codex connecté · ${codexModel}.` : "Compagnon accessible. Ouvrez-le pour connecter ChatGPT, puis vérifiez à nouveau.");
     clearAiStatusWarningIfConfigured();
     if (aiProvider === "codex") scheduleSearch({ immediate: true });
   } catch (error) {
@@ -583,22 +584,10 @@ function syncAiSettingsStatus(message = "") {
     return;
   }
   if (aiEnabled) {
-    aiSettingsStatus.textContent = `Mode AI prêt sur ${AI_MODEL}. La clé est stockée localement dans ce navigateur.`;
+    aiSettingsStatus.textContent = `Prêt · ${AI_MODEL}.`;
     return;
   }
-  aiSettingsStatus.textContent = `Clé disponible. Activez le bouton AI dans la barre de recherche pour utiliser ${AI_MODEL}.`;
-}
-
-function scheduleScrollSync() {
-  if (scrollFrame) return;
-  scrollFrame = requestAnimationFrame(() => {
-    scrollFrame = null;
-    syncScrollState();
-  });
-}
-
-function syncScrollState() {
-  document.body.classList.toggle("is-scrolled", window.scrollY > 16);
+  aiSettingsStatus.textContent = `Clé enregistrée · ${AI_MODEL}.`;
 }
 
 function clearAiSearchState(options = {}) {
@@ -909,9 +898,10 @@ function handleGridKeydown(event) {
     const next = event.key === "Home" ? 0 : event.key === "End" ? displayedLogos.length - 1
       : Math.min(displayedLogos.length - 1, Math.max(0, index + steps[event.key]));
     const rect = grid.getBoundingClientRect();
-    const layout = PictosGrid.layout({ count: displayedLogos.length, columns: gridColumns, width: rect.width, top: -rect.top, viewport: window.innerHeight });
-    const y = rect.top + Math.floor(next / gridColumns) * layout.stride;
-    if (y < 0 || y + layout.size > window.innerHeight - 160) window.scrollTo({ top: window.scrollY + y - 40, behavior: "instant" });
+    const view = libraryScroll.getBoundingClientRect();
+    const layout = PictosGrid.layout({ count: displayedLogos.length, columns: gridColumns, width: rect.width, top: view.top - rect.top, viewport: libraryScroll.clientHeight });
+    const y = rect.top - view.top + Math.floor(next / gridColumns) * layout.stride;
+    if (y < 0 || y + layout.size > libraryScroll.clientHeight) libraryScroll.scrollTo({ top: libraryScroll.scrollTop + y - 12, behavior: "instant" });
     renderGridWindow();
     grid.querySelector(`[data-index="${next}"]`)?.focus({ preventScroll: true });
     return;
@@ -1667,6 +1657,7 @@ function clearSearchCache() {
 }
 
 function renderEmptyState(message) {
+  gridLayoutKey = "";
   displayedLogos = [];
   resetLazyObserver();
   grid.replaceChildren();
@@ -1679,10 +1670,11 @@ function renderEmptyState(message) {
 }
 
 function renderLogos(logos) {
+  gridLayoutKey = "";
   const searchKey = `${libraryGeneration}|${getNormalizedSearchQuery()}|${keywordFilterState}|${sortMode}|${aiSearchState.source}`;
   if (searchKey !== displayedSearchKey) {
     displayedSearchKey = searchKey;
-    window.scrollTo({ top: 0, behavior: "instant" });
+    libraryScroll.scrollTo({ top: 0, behavior: "instant" });
   }
   resetLazyObserver();
   grid.replaceChildren();
@@ -1702,8 +1694,13 @@ function renderGridWindow() {
   if (!displayedLogos.length) return;
   const rect = grid.getBoundingClientRect();
   if (!rect.width) return;
+  const view = libraryScroll.getBoundingClientRect();
   const layout = PictosGrid.layout({ count: displayedLogos.length, columns: gridColumns,
-    width: rect.width, top: -rect.top, viewport: window.innerHeight });
+    width: rect.width, top: view.top - rect.top, viewport: libraryScroll.clientHeight, overscanPixels: libraryScroll.clientHeight });
+  const focusedCard = document.activeElement?.closest?.(".logo-card");
+  const layoutKey = `${layout.start}|${layout.end}|${layout.size}|${layout.columns}|${layout.height}|${focusedCard?.dataset.index || ""}`;
+  if (layoutKey === gridLayoutKey) return;
+  gridLayoutKey = layoutKey;
   grid.style.height = `${layout.height}px`;
   const wanted = new Set();
   for (let index = layout.start; index < layout.end; index++) wanted.add(index);
@@ -1809,7 +1806,7 @@ function getLazyObserver() {
         loadLogoPreview(target);
       }
     },
-    { root: null, rootMargin: LAZY_ROOT_MARGIN, threshold: 0.1 }
+    { root: libraryScroll, rootMargin: "600px", threshold: 0 }
   );
   return lazyObserver;
 }
@@ -2291,23 +2288,7 @@ function updateSearchClear() {
 }
 
 function syncKeywordToggle() {
-  if (!keywordToggle) return;
-  const isWith = keywordFilterState === "with";
-  const isWithout = keywordFilterState === "without";
-  keywordToggle.classList.toggle("is-active", isWith);
-  keywordToggle.classList.toggle("is-negative", isWithout);
-  keywordToggle.setAttribute(
-    "aria-pressed",
-    isWith ? "true" : isWithout ? "mixed" : "false"
-  );
-  keywordToggle.setAttribute(
-    "aria-label",
-    isWith
-      ? "Keywords activés"
-      : isWithout
-        ? "Keywords désactivés"
-        : "Keywords sans filtre"
-  );
+  if (keywordToggle) keywordToggle.value = keywordFilterState;
 }
 
 function updateGridColumns(columns) {
@@ -2583,7 +2564,7 @@ function updateZipMeta(meta) {
   }
   setZipSummaryVisible(true);
   if (zipStatusText) {
-    zipStatusText.textContent = "ZIP chargé";
+    zipStatusText.textContent = `${meta.name || "Bibliothèque"} · ${meta.count || 0} SVG`;
   }
   if (!zipPanelToggled && zipPanelExpanded) {
     setZipPanelExpanded(false);

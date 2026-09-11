@@ -183,3 +183,32 @@ test("large-library AI shortlist favors matching icons and prepares phrases once
   assert.ok(result.every(logo => logo.name.startsWith('Rocket')));
   assert.equal(run('normalizations'),3);
 });
+
+test("virtual grid follows its own scroll viewport and skips unchanged row layouts", () => {
+  const { run, context, node } = setup();
+  const grid = node('logo-grid'), scroller = node('library-scroll');
+  let writes = 0;
+  const style = () => new Proxy({}, {set(target, key, value) { writes++; target[key] = value; return true; }});
+  grid.getBoundingClientRect = () => ({top:-7536, width:284});
+  grid.style = style(); grid.children = []; grid.appendChild = card => grid.children.push(card);
+  scroller.getBoundingClientRect = () => ({top:64}); scroller.clientHeight = 586;
+  context.window.innerHeight = 10000;
+  context.PictosGrid = require('../public/grid-window');
+  context.makeCard = (logo, index) => ({dataset:{index:String(index)}, style:style()});
+  run('displayedLogos=Array.from({length:1740},(_,id)=>({id}));createLogoCard=makeCard;trimPreviewCache=()=>{};renderGridWindow()');
+  const indexes = grid.children.map(card => Number(card.dataset.index));
+  assert.ok(indexes[0] > 200);
+  assert.ok(indexes.includes(230));
+  assert.ok(indexes.length < 60);
+  const previousWrites = writes;
+  run('renderGridWindow()');
+  assert.equal(writes, previousWrites);
+});
+
+test("preview loading observes the library viewport", () => {
+  const { run, context, node } = setup();
+  let options;
+  context.IntersectionObserver = class { constructor(callback, config) { options = config; } };
+  run('getLazyObserver()');
+  assert.equal(options.root, node('library-scroll'));
+});

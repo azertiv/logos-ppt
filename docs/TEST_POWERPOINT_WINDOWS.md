@@ -1,6 +1,6 @@
 # Mise à jour et tests PowerPoint Windows
 
-État au 11 septembre 2026 : la mise à jour est publiée par le workflow GitHub Pages après les tests ; son résultat se vérifie dans les Actions du dépôt. Le manifeste `manifest.xml` version **1.0.0.0** a passé le validateur Microsoft. Le compagnon a réussi une recherche réelle sur le Mac de développement. Le poste Windows professionnel et ses 1 740 vrais SVG n’ont pas été accessibles à ces essais.
+État au 11 septembre 2026 : la mise à jour est publiée par le workflow GitHub Pages après les tests ; son résultat se vérifie dans les Actions du dépôt. Le manifeste courant est `manifest.xml` version **1.0.1.0**. Le compagnon a réussi une recherche réelle sur le Mac de développement, et l’utilisateur a confirmé le fonctionnement de la liaison Codex sur Windows. Le poste Windows professionnel et ses 1 740 vrais SVG n’ont pas été directement accessibles aux essais du développeur.
 
 ## Rendre cette version accessible au poste
 
@@ -26,7 +26,7 @@ Vérifier séparément le mode API avec la clé habituelle. Son compteur doit é
 
 La documentation Microsoft indique la prise en charge PowerPoint Windows à partir de Microsoft 365 **version 2601, build 19628.20150** ; le canal Monthly Enterprise requiert **2604, build 19929.20172**. Vérifier la version réelle dans Fichier → Compte → À propos de PowerPoint. Le support effectif doit être essayé sur le poste, notamment si l’entreprise contrôle les mises à jour.
 
-Ouvrir une fois le complément dans la présentation. Sélectionner le texte « Supplier Questionnaire » dans une diapositive et appuyer sur **Ctrl + Maj + P**. Le volet doit afficher la recherche puis ajouter son premier pictogramme. Le texte source doit rester intact, y compris si l’option habituelle « Remplacer la sélection » est cochée.
+Mettre à jour le manifeste installé vers **1.0.1.0**, puis ouvrir une fois le complément dans la présentation. Sélectionner le texte « Supplier Questionnaire » dans une diapositive et appuyer sur **Ctrl + Alt + P**. Le volet doit afficher la recherche puis ajouter son premier pictogramme. Le texte source doit rester intact, y compris si l’option habituelle « Remplacer la sélection » est cochée.
 
 Fermer le volet et répéter. Sur les versions compatibles, le moteur partagé reste chargé. L’option des réglages « Garder le raccourci disponible à la réouverture de cette présentation » permet ensuite de demander son chargement lors de la prochaine ouverture de ce document. Ce choix est propre à la présentation.
 

@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;600&family=Space+Grotesk:wght@500;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="taskpane.css" />
@@ -16,8 +16,7 @@
   </head>
   <body>
     <div class="app-shell">
-      <div class="app">
-        <header class="header">
+      <header class="header">
           <div class="brand">
             <span class="brand-dot"></span>
             <div>
@@ -40,148 +39,10 @@
           </button>
         </header>
 
-        <aside id="settings-panel" class="settings-panel hidden" aria-hidden="true">
-          <div class="settings-panel-inner">
-            <section class="settings-card">
-              <div class="settings-intro">
-                <button id="settings-back" class="ghost" type="button" aria-label="Revenir aux pictogrammes">← Retour</button>
-                <h2>Réglages</h2>
-                <p>Source ZIP, affichage et recherche assistée.</p>
-              </div>
-            </section>
-
-            <section class="settings-card">
-              <div class="settings-section-title">Bibliothèque ZIP</div>
-              <section class="zip-area" id="zip-area">
-                <div id="zip-summary" class="zip-summary hidden">
-                  <button id="zip-toggle" class="zip-toggle" type="button" aria-expanded="false">
-                    <span id="zip-status-text">ZIP chargé</span>
-                    <span class="zip-chevron" aria-hidden="true">⌄</span>
-                  </button>
-                </div>
-                <div
-                  id="zip-drop"
-                  class="zip-drop"
-                  role="button"
-                  tabindex="0"
-                  aria-label="Importer un ZIP de pictogrammes"
-                >
-                  <input id="zip-input" type="file" accept=".zip,application/zip" />
-                  <div class="zip-copy">
-                    <div class="zip-title">Glissez votre .zip de pictos ici</div>
-                    <div class="zip-subtitle">Ou cliquez pour sélectionner un fichier local.</div>
-                  </div>
-                  <button id="zip-button" class="ghost" type="button">Choisir un fichier</button>
-                </div>
-                <div id="zip-meta" class="zip-meta">Aucun ZIP local chargé.</div>
-              </section>
-            </section>
-
-            <section class="settings-card">
-              <div class="settings-section-title">Affichage</div>
-              <section class="controls">
-                <label class="sort">
-                  <span>Tri</span>
-                  <select id="sort-select" class="select">
-                    <option value="az">A-Z</option>
-                    <option value="recent">Récents</option>
-                    <option value="favorites">Favoris</option>
-                  </select>
-                </label>
-                <button id="keyword-toggle" class="toggle" type="button" aria-pressed="false">Keywords</button>
-                <label class="checkbox">
-                  <input id="replace-toggle" type="checkbox" />
-                  <span>Remplacer la sélection</span>
-                </label>
-              </section>
-            </section>
-
-            <section class="settings-card">
-              <div class="settings-section-title">Raccourci PowerPoint</div>
-              <p class="settings-note">Sélectionnez du texte dans la diapositive, puis appuyez sur <strong>Ctrl + Maj + P</strong> pour rechercher et insérer le premier résultat.</p>
-              <p id="shortcut-status" class="settings-meta">Vérification de compatibilité…</p>
-              <label class="checkbox"><input id="shortcut-startup" type="checkbox" /><span>Garder le raccourci disponible à la réouverture de cette présentation</span></label>
-            </section>
-            <section class="settings-card">
-              <div class="settings-section-title">Recherche IA</div>
-              <p class="settings-note">Élargissez une idée en concepts visuels, puis classez les pictogrammes de votre bibliothèque.</p>
-              <label class="settings-field">
-                <span>Utiliser l’IA avec</span>
-                <select id="ai-provider" class="settings-input">
-                  <option value="api">Clé API OpenAI</option>
-                  <option value="codex">Abonnement ChatGPT via Codex</option>
-                </select>
-              </label>
-              <div id="ai-api-settings">
-              <label class="settings-field">
-                <span>Clé API OpenAI</span>
-                <input
-                  id="ai-api-key-input"
-                  class="settings-input"
-                  type="password"
-                  placeholder="sk-..."
-                  autocomplete="off"
-                  autocapitalize="off"
-                  spellcheck="false"
-                />
-              </label>
-              <div class="settings-actions">
-                <button id="ai-api-save" class="primary" type="button">Enregistrer</button>
-                <button id="ai-api-clear" class="ghost" type="button">Supprimer</button>
-              </div>
-              </div>
-              <div id="ai-codex-settings" class="hidden">
-                <p class="settings-note">Lancez le compagnon sur cet ordinateur, connectez-y ChatGPT et copiez son code de liaison. Cette option utilise votre quota Codex partagé.</p>
-                <label class="settings-field"><span>Code de liaison du compagnon</span><input id="ai-codex-token" class="settings-input" type="password" autocomplete="off" spellcheck="false" placeholder="Code affiché par le compagnon"></label>
-                <details class="settings-note"><summary>Adresse du compagnon</summary><label class="settings-field"><span>Adresse locale</span><input id="ai-codex-url" class="settings-input" type="url" value="http://127.0.0.1:43129" spellcheck="false"></label></details>
-                <div class="settings-actions"><button id="ai-codex-connect" class="primary" type="button">Vérifier la connexion</button><button id="ai-codex-open" class="ghost" type="button">Ouvrir le compagnon</button></div>
-                <label class="settings-field"><span>Modèle Codex</span><select id="ai-codex-model" class="settings-input"><option value="">Vérifiez la connexion</option></select></label>
-                <p id="ai-codex-limits" class="settings-meta codex-limits" aria-live="polite">Limites non disponibles.</p>
-                <p class="settings-note">Connexion expérimentale. Si Codex est indisponible, la recherche locale continue. Aucun basculement automatique vers l’API payante.</p>
-              </div>
-              <div id="ai-settings-status" class="settings-meta">
-                Clé absente. Le mode IA restera désactivé.
-              </div>
-              <div id="ai-api-usage">
-              <div class="usage-grid">
-                <div class="usage-item">
-                  <span>Appels API</span>
-                  <strong id="ai-usage-calls">0</strong>
-                </div>
-                <div class="usage-item">
-                  <span>Input</span>
-                  <strong id="ai-usage-input">0</strong>
-                </div>
-                <div class="usage-item">
-                  <span>Cached</span>
-                  <strong id="ai-usage-cached">0</strong>
-                </div>
-                <div class="usage-item">
-                  <span>Output</span>
-                  <strong id="ai-usage-output">0</strong>
-                </div>
-                <div class="usage-item">
-                  <span>Dernier coût</span>
-                  <strong id="ai-usage-last-cost">$0.000000</strong>
-                </div>
-                <div class="usage-item">
-                  <span>Coût cumulé</span>
-                  <strong id="ai-usage-total-cost">$0.000000</strong>
-                </div>
-              </div>
-              <div id="ai-pricing-note" class="settings-meta">
-                Estimation gpt-5.6-luna: input $0.20/M, cached input $0.02/M, output $1.20/M.
-              </div>
-              <button id="ai-usage-reset" class="ghost" type="button">Réinitialiser le suivi</button>
-              </div>
-            </section>
-          </div>
-        </aside>
-
+      <main id="library-scroll" class="library-scroll" tabindex="-1" aria-label="Bibliothèque de pictogrammes">
         <section id="status" class="status" aria-live="polite"></section>
-
         <section class="grid" id="logo-grid" aria-label="Pictogrammes"></section>
-      </div>
+      </main>
 
       <div class="search-dock" id="search-dock">
         <div class="search-dock-inner">
@@ -203,6 +64,95 @@
           </button>
         </div>
       </div>
+
+      <aside id="settings-panel" class="settings-panel hidden" aria-hidden="true" aria-labelledby="settings-title">
+        <header class="settings-header">
+          <button id="settings-back" class="back-button" type="button" aria-label="Revenir aux pictogrammes">←</button>
+          <h2 id="settings-title">Réglages</h2>
+        </header>
+        <div class="settings-content" id="settings-content">
+          <div class="settings-panel-inner">
+            <section class="settings-card" aria-labelledby="library-title">
+              <div class="section-heading"><h3 id="library-title">Bibliothèque</h3>
+                <details class="info-tip"><summary aria-label="À propos de la bibliothèque">i</summary><div class="info-content"><p>Importez un ZIP contenant vos SVG. La bibliothèque est conservée sur cet ordinateur. Cliquer sur son nom permet de la remplacer.</p></div></details>
+              </div>
+              <div class="zip-area" id="zip-area">
+                <div id="zip-summary" class="zip-summary hidden">
+                  <button id="zip-toggle" class="zip-toggle" type="button" aria-expanded="false">
+                    <span id="zip-status-text">Bibliothèque chargée</span><span class="zip-chevron" aria-hidden="true">⌄</span>
+                  </button>
+                </div>
+                <div id="zip-drop" class="zip-drop" role="button" tabindex="0" aria-label="Importer un ZIP de pictogrammes">
+                  <input id="zip-input" type="file" accept=".zip,application/zip" />
+                  <div class="zip-copy"><span class="zip-title">Déposez votre fichier ZIP</span></div>
+                  <button id="zip-button" class="ghost" type="button">Choisir un fichier</button>
+                </div>
+                <div id="zip-meta" class="zip-meta">Aucune bibliothèque importée.</div>
+              </div>
+            </section>
+
+            <section class="settings-card" aria-labelledby="ai-title">
+              <div class="section-heading"><h3 id="ai-title">Recherche IA</h3>
+                <details class="info-tip"><summary aria-label="À propos de la recherche IA">i</summary><div class="info-content"><p>L’IA aide à trouver des pictogrammes à partir d’une idée. Seuls la recherche et les noms ou mots-clés des candidats sont transmis au service choisi. Activez AI dans la barre de recherche.</p></div></details>
+              </div>
+              <label class="settings-field"><span>Utiliser</span>
+                <select id="ai-provider" class="settings-input"><option value="api">Clé API OpenAI</option><option value="codex">Abonnement ChatGPT · Codex</option></select>
+              </label>
+              <div id="ai-api-settings" class="provider-fields">
+                <label class="settings-field"><span>Clé API OpenAI</span><input id="ai-api-key-input" class="settings-input" type="password" placeholder="sk-…" autocomplete="off" autocapitalize="off" spellcheck="false" /></label>
+                <div class="settings-actions"><button id="ai-api-save" class="primary" type="button">Enregistrer</button><button id="ai-api-clear" class="ghost" type="button">Supprimer</button></div>
+              </div>
+              <div id="ai-codex-settings" class="provider-fields hidden">
+                <div class="field-heading"><label for="ai-codex-token">Code de liaison</label>
+                  <details class="info-tip"><summary aria-label="Où trouver le code de liaison">i</summary><div class="info-content"><p>Lancez le compagnon sur ce PC et connectez-y ChatGPT, puis copiez son code ici. Ce code change à chaque redémarrage du compagnon.</p></div></details>
+                </div>
+                <input id="ai-codex-token" class="settings-input" type="password" autocomplete="off" spellcheck="false" placeholder="Code affiché par le compagnon" />
+                <div class="settings-actions"><button id="ai-codex-connect" class="primary" type="button">Connecter</button><button id="ai-codex-open" class="ghost" type="button">Ouvrir le compagnon</button></div>
+                <label class="settings-field"><span>Modèle</span><select id="ai-codex-model" class="settings-input"><option value="">Connectez le compagnon</option></select></label>
+                <details class="settings-details"><summary>Quota et connexion</summary>
+                  <p id="ai-codex-limits" class="settings-meta codex-limits" aria-live="polite">Limites non disponibles.</p>
+                  <label class="settings-field"><span>Adresse du compagnon</span><input id="ai-codex-url" class="settings-input" type="url" value="http://127.0.0.1:43129" spellcheck="false" /></label>
+                  <p class="settings-note">Le quota est partagé avec votre compte Codex. Si le compagnon est indisponible, la recherche reste locale ; aucun appel API payant ne prend le relais.</p>
+                </details>
+              </div>
+              <p id="ai-settings-status" class="settings-meta" aria-live="polite">Ajoutez une clé API pour utiliser l’IA.</p>
+              <div id="ai-api-usage">
+                <details class="settings-details"><summary>Consommation API</summary>
+                  <div class="usage-grid">
+                    <div class="usage-item"><span>Appels</span><strong id="ai-usage-calls">0</strong></div>
+                    <div class="usage-item"><span>Coût cumulé</span><strong id="ai-usage-total-cost">$0.000000</strong></div>
+                    <div class="usage-item"><span>Entrée</span><strong id="ai-usage-input">0</strong></div>
+                    <div class="usage-item"><span>Entrée en cache</span><strong id="ai-usage-cached">0</strong></div>
+                    <div class="usage-item"><span>Sortie</span><strong id="ai-usage-output">0</strong></div>
+                    <div class="usage-item"><span>Dernier appel</span><strong id="ai-usage-last-cost">$0.000000</strong></div>
+                  </div>
+                  <p id="ai-pricing-note" class="settings-meta"></p>
+                  <button id="ai-usage-reset" class="ghost" type="button">Réinitialiser le suivi</button>
+                </details>
+              </div>
+            </section>
+
+            <section class="settings-card" aria-labelledby="insertion-title">
+              <div class="section-heading"><h3 id="insertion-title">Insertion</h3>
+                <details class="info-tip"><summary aria-label="À propos de l’insertion">i</summary><div class="info-content"><p>Le remplacement s’applique aux logos insérés par clic. Le raccourci ajoute un pictogramme et conserve toujours le texte sélectionné.</p></div></details>
+              </div>
+              <label class="checkbox"><input id="replace-toggle" type="checkbox" /><span>Remplacer la sélection</span></label>
+              <div class="shortcut-row"><span>Depuis le texte sélectionné</span><kbd>Ctrl + Alt + P</kbd>
+                <details class="info-tip"><summary aria-label="Utiliser le raccourci PowerPoint">i</summary><div class="info-content"><p>Sélectionnez une expression dans PowerPoint, puis utilisez ce raccourci pour rechercher et insérer le premier résultat. Le volet peut être fermé après sa première ouverture, sur les versions compatibles.</p><p id="shortcut-status" class="settings-meta">Chargement…</p></div></details>
+              </div>
+              <label class="checkbox"><input id="shortcut-startup" type="checkbox" /><span>Activer à l’ouverture de cette présentation</span></label>
+            </section>
+
+            <section class="settings-card" aria-labelledby="display-title">
+              <div class="section-heading"><h3 id="display-title">Affichage</h3></div>
+              <div class="controls">
+                <label class="settings-field"><span>Trier par</span><select id="sort-select" class="select"><option value="az">Nom · A–Z</option><option value="recent">Utilisation récente</option><option value="favorites">Favoris en premier</option></select></label>
+                <label class="settings-field"><span>Afficher</span><select id="keyword-toggle" class="select"><option value="all">Tous les pictogrammes</option><option value="with">Avec mots-clés</option><option value="without">Sans mots-clés</option></select></label>
+              </div>
+            </section>
+          </div>
+        </div>
+      </aside>
     </div>
 
     <script src="ai-tasks.js"></script>
