@@ -6,6 +6,15 @@ const tasks = new Map();
 const timers = new Map();
 const send = msg => process.stdout.write(JSON.stringify(msg) + "\n");
 let count = 0;
+// Deterministic stand-in for the meeting notes model: keeps previous key
+// points (same ids) and adds one per call from the first new transcript line.
+function meetingSummary(input) {
+  if (input.transcript.includes("invalid-output")) return { summary: "x", key_points: [], extra: true };
+  const first = input.transcript.split("\n")[0];
+  const kept = input.previous.keyPoints.map(k => ({ id: k.id, title: k.title, detail: k.detail }));
+  const summary = [input.previous.summary, `(${input.language}) ${first}`].filter(Boolean).join(" ");
+  return { summary, key_points: [...kept, { id: `point-${kept.length + 1}`, title: first.slice(0, 60), detail: input.context || "" }] };
+}
 readline.createInterface({ input: process.stdin }).on("line", line => {
   const message = JSON.parse(line);
   if (process.env.PICTOS_TEST_TRACE) fs.appendFileSync(process.env.PICTOS_TEST_TRACE, line + "\n");
@@ -37,7 +46,9 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
       const finish = () => {
         if (input.query === "tool") { send({ id: "approval-1", method: "item/commandExecution/requestApproval", params: { threadId: p.threadId, turnId } }); reply({ turn: { id: turnId } }); return; }
         if (input.query === "quota") { reply({ turn: { id: turnId } }); send({ method: "turn/completed", params: { threadId: p.threadId, turn: { id: turnId, status: "failed", error: { message: "usage limit exceeded" }, items: [] } } }); return; }
-        const output = input.candidates ? { ordered_ids: input.query === "invalid" ? [9999] : input.candidates.map(c => c.id).reverse().slice(0, 24), note: "" } : { core_concepts: ["ambition"], visual_metaphors: ["sommet"], concrete_objects: ["fusée"], related_keywords: ["cible"] };
+        const output = input.task === "meeting-summary" ? meetingSummary(input)
+          : input.task === "meeting-expand" ? { sub_points: [{ title: `Détail : ${input.keyPoint.title}`, detail: input.transcript.split("\n")[0] }] }
+          : input.candidates ? { ordered_ids: input.query === "invalid" ? [9999] : input.candidates.map(c => c.id).reverse().slice(0, 24), note: "" } : { core_concepts: ["ambition"], visual_metaphors: ["sommet"], concrete_objects: ["fusée"], related_keywords: ["cible"] };
         const item = { id: "answer", type: "agentMessage", phase: "final_answer", text: JSON.stringify(output) };
         send({ method: "item/completed", params: { threadId: p.threadId, turnId, item } });
         send({ method: "turn/completed", params: { threadId: p.threadId, turn: { id: turnId, status: "completed", items: [] } } });

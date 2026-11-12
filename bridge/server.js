@@ -7,7 +7,13 @@ const os = require("node:os");
 const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 const { CodexRpc, BridgeError } = require("./codex-rpc.js");
-const { CodexService } = require("./codex-service.js");
+const { CodexService, VERSION } = require("./codex-service.js");
+// Syllens (Meet/Teams transcription extension) has a fixed id from its manifest key.
+const SYLLENS_EXTENSION_ORIGIN = "chrome-extension://ncoilhmgdphmchbcdlajbjnfkbmbfogk";
+const CAPABILITIES = ["pictos-search", "meeting-notes"];
+const MEETING_ROUTES = new Map([["/v1/meeting/summarize", "summarize"], ["/v1/meeting/expand", "expand"]]);
+const BODY_LIMIT = 128 * 1024;
+const MEETING_BODY_LIMIT = 1024 * 1024;
 const { managedChannel } = require("./managed-runtime.js");
 const root = path.resolve(__dirname, "..");
 
@@ -35,7 +41,7 @@ function runtimeOptions(env = process.env) {
 
 function createBridge({ service, token = crypto.randomBytes(32).toString("hex"), port = 43129, allowedOrigins = [], tls, clock = Date.now, pairingPersistent = false } = {}) {
   const scheme = tls ? "https" : "http";
-  const origins = new Set(["https://azertiv.github.io", "https://localhost:3000", ...allowedOrigins]);
+  const origins = new Set(["https://azertiv.github.io", "https://localhost:3000", SYLLENS_EXTENSION_ORIGIN, ...allowedOrigins]);
   const publicFiles = new Map([
     ["/", [path.join(__dirname, "ui/index.html"), "text/html; charset=utf-8"]],
     ["/dashboard.js", [path.join(__dirname, "ui/dashboard.js"), "text/javascript; charset=utf-8"]],
@@ -70,7 +76,7 @@ function createBridge({ service, token = crypto.randomBytes(32).toString("hex"),
       try { const content = await fs.promises.readFile(file); res.writeHead(200, { "Content-Type": type }); return res.end(content); }
       catch { return json(res, 500, { error: "Fichier du compagnon manquant." }); }
     }
-    if (req.method === "GET" && pathname === "/health") return json(res, 200, { application: "atelier-pictos", version: "1.1.0" });
+    if (req.method === "GET" && pathname === "/health") return json(res, 200, { application: "atelier-pictos", version: VERSION, capabilities: CAPABILITIES });
     if (req.method === "POST" && pathname === "/dashboard/session") {
       if (!localOrigins.has(origin)) return json(res, 403, { error: "Ouvrez la liaison depuis l’icône du compagnon." });
       if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] || "")) return json(res, 415, { error: "Un contenu JSON est requis." });
@@ -98,7 +104,8 @@ function createBridge({ service, token = crypto.randomBytes(32).toString("hex"),
       if (pathname === "/v1/connection" && req.method === "GET") return json(res, 200, { ...await service.connection(), pairingPersistent });
       if (req.method !== "POST") return json(res, 405, { error: "Méthode non autorisée." });
       if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] || "")) return json(res, 415, { error: "Un contenu JSON est requis." });
-      const body = await readBody(req);
+      const body = await readBody(req, MEETING_ROUTES.has(pathname) ? MEETING_BODY_LIMIT : BODY_LIMIT);
+      if (MEETING_ROUTES.has(pathname)) return json(res, 200, await service.meeting(MEETING_ROUTES.get(pathname), body, controller.signal));
       let result;
       switch (pathname) {
         case "/v1/dashboard-ticket": {
@@ -120,7 +127,8 @@ function createBridge({ service, token = crypto.randomBytes(32).toString("hex"),
     }
   }
   const server = tls ? https.createServer(tls, handle) : http.createServer(handle);
-  server.requestTimeout = 110000; server.headersTimeout = 10000;
+  // Meeting summaries may take up to the service's meeting timeout (180 s).
+  server.requestTimeout = 210000; server.headersTimeout = 10000;
   return {
     token, server,
     async listen() {
@@ -131,12 +139,12 @@ function createBridge({ service, token = crypto.randomBytes(32).toString("hex"),
     async close() { service.stop(); server.closeAllConnections(); if (server.listening) await new Promise(resolve => server.close(resolve)); }
   };
 }
-async function readBody(req) {
+async function readBody(req, limit = BODY_LIMIT) {
   let size = 0;
   const chunks = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 128 * 1024) throw new BridgeError("Demande trop volumineuse.", "BODY_TOO_LARGE", 413);
+    if (size > limit) throw new BridgeError("Demande trop volumineuse.", "BODY_TOO_LARGE", 413);
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
@@ -158,7 +166,7 @@ async function main() {
   managed?.once("stop", stop);
   if (managed?.isClosed()) { await stop(); return; }
   const url = await bridge.listen();
-  if (managed) console.log(JSON.stringify({ event: "ready", url, version: "1.1.0" }));
+  if (managed) console.log(JSON.stringify({ event: "ready", url, version: VERSION }));
   else console.log(`\nAtelier Pictos — mode console de développement\n\nOuvrir : ${url}/#${bridge.token}\nCode de liaison temporaire : ${bridge.token}\n\nCtrl+C pour arrêter. Sur Windows, lancez Neurow.Pictos.exe pour la liaison permanente et le fonctionnement sans fenêtre.\n`);
   if (!managed && process.argv.includes("--open")) {
     const fullUrl = `${url}/#${bridge.token}`;

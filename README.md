@@ -15,6 +15,7 @@ Le ZIP reste dans le stockage local du complément. Seuls la recherche et les no
 - [Revue, corrections et limites de validation](docs/AUDIT_2026-09-11.md)
 - [Correctifs du défilement, des réglages et du raccourci](docs/CORRECTIFS_1.0.1.md)
 - [Fonctionnement et vérification du compagnon 1.1.0](docs/COMPAGNON_1.1.0.md)
+- [Notes de réunion pour l’extension Syllens (compagnon 1.2.0)](docs/SYLLENS_REUNIONS.md)
 
 Un envoi sur `main` déclenche les tests puis la publication GitHub Pages. Modifier les fichiers uniquement en local ne met pas à jour l’extension déjà installée. Le site fournit aussi `manifest.xml` pour installer la configuration des raccourcis, et `deployment.json` pour identifier la révision publiée.
 
