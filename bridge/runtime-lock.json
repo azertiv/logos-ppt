@@ -1,9 +1,9 @@
 {
   "architecture": "windows-x64",
   "codex": {
-    "version": "0.154.0",
-    "url": "https://github.com/openai/codex/releases/download/rust-v0.154.0/codex-x86_64-pc-windows-msvc.exe.zip",
-    "sha256": "53685f9f6bd171d4bd7d6c2be724fc04f6737a4001eb8471ec59824e5adc8042",
+    "version": "0.167.2",
+    "url": "https://github.com/openai/codex/releases/download/rust-v0.167.2/codex-x86_64-pc-windows-msvc.exe.zip",
+    "sha256": "9f9af73c0761d2a364adaf9de2c69c41f406288f28da5d8077665b2862170704",
     "archive": "codex-windows-x64.zip"
   },
   "node": {
@@ -15,12 +15,12 @@
   "licenses": [
     {
       "archive": "CODEX-LICENSE.txt",
-      "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.154.0/LICENSE",
+      "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.167.2/LICENSE",
       "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc"
     },
     {
       "archive": "CODEX-NOTICE.txt",
-      "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.154.0/NOTICE",
+      "url": "https://raw.githubusercontent.com/openai/codex/rust-v0.167.2/NOTICE",
       "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915"
     }
   ]

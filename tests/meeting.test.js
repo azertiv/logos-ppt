@@ -34,7 +34,7 @@ const summarizeBody = (extra = {}) => ({ language: "fr-FR", meeting, transcript:
 test("health announces meeting notes", async t => {
   const f = await fixture(t);
   const health = await (await fetch(f.url + "/health")).json();
-  assert.equal(health.version, "1.2.0");
+  assert.equal(health.version, "1.2.1");
   assert.ok(health.capabilities.includes("meeting-notes"));
   assert.ok(health.capabilities.includes("pictos-search"));
 });

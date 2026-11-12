@@ -17,6 +17,10 @@ Le contrat est dans `bridge/meeting-tasks.js` : schémas de sortie stricts, vali
 - Code de liaison obligatoire sur `/v1/*`. Parmi les extensions de navigateur, seule l’origine de Syllens est acceptée (`chrome-extension://ncoilhmgdphmchbcdlajbjnfkbmbfogk`, identifiant fixé par la clé de son manifeste). `PICTOS_ALLOWED_ORIGINS` permet d’en ajouter une autre, par exemple après publication sur le Chrome Web Store.
 - Limites : 128 Ko par demande pour la recherche, 1 Mo pour les routes de réunion. Délai : 90 s pour la recherche, 180 s pour une synthèse.
 
+## 1.2.1 — Codex 0.167.2
+
+Le compagnon embarque désormais Codex **0.167.2** au lieu de 0.154.0. La liste des modèles proposée à PowerPoint et à Syllens vient des serveurs d’OpenAI, qui ne proposent les modèles récents qu’aux versions de Codex suffisamment récentes : avec 0.154.0, les modèles GPT 6.x (`gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-luna`…) n’apparaissaient pas. L’empreinte SHA-256 de l’archive officielle est fixée dans `bridge/runtime-lock.json` ; la licence et la notice de Codex sont inchangées.
+
 ## Vérification
 
 `npm test` couvre les deux routes avec le faux Codex : capacités annoncées, origine et code de liaison, fil éphémère en lecture seule, schéma imposé, conservation des identifiants d’une synthèse à la suivante, développement d’un point clé, limites de taille, réponse invalide refusée et partage de l’unique créneau Codex avec la recherche.

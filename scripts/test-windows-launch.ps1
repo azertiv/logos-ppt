@@ -25,7 +25,7 @@ try {
         $token = ([BitConverter]::ToString($secret)).Replace('-', '').ToLowerInvariant()
         $state = Invoke-RestMethod 'http://127.0.0.1:43129/v1/connection' -Headers @{ Authorization = ('Bearer ' + $token) } -TimeoutSec 35
         [Array]::Clear($secret, 0, $secret.Length); $token = $null
-        if ($state.version -ne '1.2.0' -or $state.connected -ne $false -or $state.pairingPersistent -ne $true) { throw 'The packaged Codex connection did not match the isolated test profile.' }
+        if ($state.version -ne '1.2.1' -or $state.connected -ne $false -or $state.pairingPersistent -ne $true) { throw 'The packaged Codex connection did not match the isolated test profile.' }
         Stop-Process -Id $nativeProcess.Id -Force
         $nativeProcess.WaitForExit(10000) | Out-Null
         $nativeProcess = $null
